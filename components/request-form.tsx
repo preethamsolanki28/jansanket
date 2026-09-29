@@ -20,10 +20,11 @@ import {
   ALLOWED_SEVERITIES,
   InfrastructureCategory,
   Severity,
+  RequestSource,
   checkDistrictCoverage,
   isMeaningfulRequest,
 } from "@/lib/validation";
-import { GeminiExtractionResult } from "@/lib/gemini";
+import { CitizenRequestExtractionResult } from "@/lib/ai";
 import {
   Sparkles,
   AlertTriangle,
@@ -100,7 +101,7 @@ export function RequestForm() {
   const [submissionError, setSubmissionError] = useState<string | null>(null);
 
   // Preview & manual correction state
-  const [extraction, setExtraction] = useState<GeminiExtractionResult | null>(null);
+  const [extraction, setExtraction] = useState<CitizenRequestExtractionResult | null>(null);
   const [editableCategory, setEditableCategory] = useState<InfrastructureCategory>("roads");
   const [editableState, setEditableState] = useState("");
   const [editableDistrict, setEditableDistrict] = useState("");
@@ -171,7 +172,7 @@ export function RequestForm() {
         throw new Error(data.error || "Please describe a real infrastructure or public-service problem.");
       }
 
-      const ext: GeminiExtractionResult = data.extraction;
+      const ext: CitizenRequestExtractionResult = data.extraction;
 
       if (!ext.isValidRequest) {
         throw new Error(ext.rejectionReason || "Please describe a real infrastructure or public-service problem.");
@@ -235,15 +236,25 @@ export function RequestForm() {
     setIsSubmitting(true);
     setSubmissionError(null);
 
+    // Citizen input channel:
+    // Manual fallback always submits as "manual_fallback"
+    // Normal text intake submits as "text"
+    // Voice (if implemented) submits as "voice"
+    const channelSource: RequestSource =
+      extraction?.isFallback || extraction?.source === "manual_fallback"
+        ? "manual_fallback"
+        : (extraction?.source === "voice" ? "voice" : "text");
+
     try {
       const res = await fetch("/api/requests", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           action: "submit",
-          source: extraction?.source || (extraction?.isFallback ? "manual_fallback" : "text"),
+          source: channelSource,
           rawText,
           requestData: {
+            source: channelSource,
             raw_text: rawText,
             language_code: extraction?.language || "en",
             state: pairCheck.canonical.state,
@@ -586,7 +597,7 @@ export function RequestForm() {
                 disabled={isAnalyzing || rawText.trim().length < 5}
                 className="bg-primary hover:bg-[#1E40AF] text-white"
               >
-                {isAnalyzing ? "Analyzing with Gemini…" : "Analyze Request"}
+                {isAnalyzing ? "Analyzing Request…" : "Analyze Request"}
               </Button>
               {rawText && (
                 <Button
@@ -607,27 +618,29 @@ export function RequestForm() {
       {/* State 2: Extraction Preview & Verification Card */}
       {extraction && (
         <Card className={`bg-white shadow-sm animate-in fade-in duration-300 ${
-          extraction.source === "gemini" && !extraction.isFallback ? "border-primary/40" : "border-amber-300"
+          !extraction.isFallback ? "border-primary/40" : "border-amber-300"
         }`}>
           <CardHeader className={`pb-3 border-b border-border ${
-            extraction.source === "gemini" && !extraction.isFallback ? "bg-blue-50/40" : "bg-amber-50/40"
+            !extraction.isFallback ? "bg-blue-50/40" : "bg-amber-50/40"
           }`}>
             <div className="flex items-center justify-between flex-wrap gap-2">
               <div className="flex items-center gap-2">
                 <span className={`text-xs font-semibold uppercase tracking-wider ${
-                  extraction.source === "gemini" && !extraction.isFallback ? "text-primary" : "text-amber-800"
+                  !extraction.isFallback ? "text-primary" : "text-amber-800"
                 }`}>
-                  {extraction.source === "gemini" && !extraction.isFallback ? "AI Extraction Preview" : "Manual Fallback Review (AI Unavailable)"}
+                  {!extraction.isFallback ? "AI Extraction Preview" : "Manual Fallback Review (AI Unavailable)"}
                 </span>
                 <Badge
                   variant="outline"
                   className={
-                    extraction.source === "gemini" && !extraction.isFallback
+                    !extraction.isFallback
                       ? "bg-blue-50 text-blue-700 border-blue-200 text-xs"
                       : "bg-amber-100 text-amber-800 border-amber-300 text-xs font-medium"
                   }
                 >
-                  {extraction.source === "gemini" && !extraction.isFallback ? "Analyzed by Gemini 3.8 Flash" : "Manual Fallback Mode"}
+                  {!extraction.isFallback
+                    ? (extraction.modelUsed ? `AI: ${extraction.modelUsed} (OpenRouter)` : "AI: GPT-4o-mini via OpenRouter")
+                    : "Manual Fallback Mode"}
                 </Badge>
               </div>
 
@@ -635,8 +648,8 @@ export function RequestForm() {
                 <Badge variant="outline" className="text-xs uppercase bg-white">
                   Language: {extraction.language}
                 </Badge>
-                {/* AI Confidence is shown ONLY for genuine successful Gemini extractions */}
-                {extraction.source === "gemini" && !extraction.isFallback && extraction.confidence !== null ? (
+                {/* AI Confidence is shown ONLY for genuine successful AI extractions */}
+                {!extraction.isFallback && extraction.confidence !== null ? (
                   <Badge
                     variant="outline"
                     className={`text-xs ${
@@ -664,20 +677,20 @@ export function RequestForm() {
           </CardHeader>
 
           <CardContent className="pt-5 space-y-4">
-            {/* BUG 5: Explanatory line explaining the purpose of Gemini */}
+            {/* Explanatory line explaining the purpose of AI */}
             <div className="p-3 bg-blue-50/70 border border-blue-200 rounded-md text-xs text-blue-900 flex items-start gap-2.5">
               <Sparkles className="h-4 w-4 text-primary shrink-0 mt-0.5" />
               <div className="space-y-1">
                 <p className="font-semibold text-blue-950">
-                  How JanSanket uses Gemini:
+                  How JanSanket uses AI:
                 </p>
                 <p className="text-blue-800 leading-snug">
-                  Gemini converts the citizen&apos;s message into structured information (language, category, location, severity, and English need summary) so requests can be grouped and compared across districts. Gemini does NOT compute priority scores or allocate budgets—that is calculated deterministically by JanSanket&apos;s planning algorithm.
+                  AI converts the citizen&apos;s message into structured information (language, category, location, severity, and English need summary) so requests can be grouped and compared across districts. AI does NOT compute priority scores or allocate budgets—that is calculated deterministically by JanSanket&apos;s planning algorithm.
                 </p>
                 <div className="pt-0.5 flex items-center gap-1.5 text-[11px] text-blue-700 font-medium flex-wrap">
                   <span>Citizen Language</span>
                   <span>&rarr;</span>
-                  <span>Gemini structures evidence</span>
+                  <span>AI structures evidence</span>
                   <span>&rarr;</span>
                   <span>Application aggregates requests</span>
                   <span>&rarr;</span>

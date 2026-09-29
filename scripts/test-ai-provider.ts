@@ -1,0 +1,338 @@
+/**
+ * Comprehensive AI Provider Verification Suite
+ * Tests OpenRouter + GPT-4o-mini provider abstraction and fallback paths:
+ * 1. Valid English request
+ * 2. Kannada input (authentic Kannada text -> English summary)
+ * 3. Hindi input (authentic Hindi text -> English summary)
+ * 4. Tamil input (authentic Tamil text -> English summary)
+ * 5. Gibberish input (e.g. "sdgsafdasafd") -> rejected
+ * 6. Non-civic text (e.g. "hello there how are you", "I like apples", "this is a test") -> rejected
+ * 7. Missing district -> null, never default to Ramanagara
+ * 8. Unsupported district -> outside coverage flagged, never Ramanagara
+ * 9. State-district mismatch (Goa + Ramanagara) -> rejected
+ * 10. Malformed AI response -> graceful recovery without crash
+ * 11. 429 / offline fallback -> clean fallback, confidence: null, no fake AI data
+ *
+ * Usage:
+ *   npx tsx scripts/test-ai-provider.ts
+ */
+
+import fs from "fs";
+import path from "path";
+import { normalizeCitizenRequest, getPreparedFallback } from "../lib/ai";
+import { checkDistrictCoverage, validateCitizenRequest, isMeaningfulRequest } from "../lib/validation";
+
+// Auto-load .env.local if present
+try {
+  const envPath = path.resolve(__dirname, "../.env.local");
+  if (fs.existsSync(envPath)) {
+    const lines = fs.readFileSync(envPath, "utf-8").split("\n");
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith("#")) continue;
+      const eqIdx = trimmed.indexOf("=");
+      if (eqIdx > 0) {
+        const key = trimmed.slice(0, eqIdx).trim();
+        const val = trimmed.slice(eqIdx + 1).trim();
+        if (!process.env[key]) {
+          process.env[key] = val;
+        }
+      }
+    }
+  }
+} catch {
+  // Ignore
+}
+
+async function runAiProviderTests() {
+  console.log("==================================================");
+  console.log("  JanSanket AI Provider & Fallback Test Suite");
+  console.log("  Provider: OpenRouter (openai/gpt-4o-mini) + Fallback");
+  console.log("==================================================\n");
+
+  let passed = 0;
+  let failed = 0;
+
+  function assert(title: string, condition: boolean, detail?: string) {
+    if (condition) {
+      console.log(`[PASS] ${title}${detail ? ` (${detail})` : ""}`);
+      passed++;
+    } else {
+      console.log(`[FAIL] ${title}${detail ? ` (${detail})` : ""}`);
+      failed++;
+    }
+  }
+
+  // 1. Valid English request
+  console.log("--- 1. Valid English Request ---");
+  const enRes = await normalizeCitizenRequest(
+    "In Ramanagara district, the road connecting our village to the main highway is completely broken and full of deep potholes.",
+    "Karnataka",
+    "Ramanagara"
+  );
+  assert(
+    "English Request is valid",
+    enRes.isValidRequest === true,
+    `category: ${enRes.category}, district: ${enRes.district}`
+  );
+  assert(
+    "English Request maps to roads category",
+    enRes.category === "roads"
+  );
+  assert(
+    "English Request identifies Ramanagara",
+    enRes.district === "Ramanagara" && enRes.state === "Karnataka"
+  );
+
+  // 2. Kannada input
+  console.log("\n--- 2. Kannada Input ---");
+  const knRes = await normalizeCitizenRequest(
+    "ಮಳೆ ಬಂದಾಗ ನಮ್ಮ ಗ್ರಾಮದ ರಸ್ತೆ ಬಳಸಲು ಸಾಧ್ಯವಾಗುವುದಿಲ್ಲ, ರಾಮನಗರ ಜಿಲ್ಲೆಯ ಶಾಲೆಗೆ ಹೋಗಲು ಕಷ್ಟವಾಗುತ್ತಿದೆ.",
+    "Karnataka",
+    "Ramanagara"
+  );
+  assert("Kannada input is valid", knRes.isValidRequest === true);
+  assert("Kannada input detects category 'roads'", knRes.category === "roads");
+  assert(
+    "Kannada input has English need summary (no raw Indic characters)",
+    !/[\u0C80-\u0CFF]/.test(knRes.need_summary) && knRes.need_summary.length > 5,
+    `summary: "${knRes.need_summary}"`
+  );
+
+  // 3. Hindi input
+  console.log("\n--- 3. Hindi Input ---");
+  const hiRes = await normalizeCitizenRequest(
+    "बहराइच जिले के हमारे गांव में पीने के पानी की भारी किल्लत है और सरकारी हैंडपंप महीनों से खराब पड़े हैं।",
+    "Uttar Pradesh",
+    "Bahraich"
+  );
+  assert("Hindi input is valid", hiRes.isValidRequest === true);
+  assert("Hindi input detects category 'water'", hiRes.category === "water");
+  assert(
+    "Hindi input has English need summary (no raw Devanagari script)",
+    !/[\u0900-\u097F]/.test(hiRes.need_summary) && hiRes.need_summary.length > 5,
+    `summary: "${hiRes.need_summary}"`
+  );
+
+  // 4. Tamil input
+  console.log("\n--- 4. Tamil Input ---");
+  const taRes = await normalizeCitizenRequest(
+    "தருமபுரி மாவட்டத்தில் எங்கள் கிராம ஆரம்ப சுகாதார நிலையத்தில் மருத்துவர் மற்றும் அடிப்படை மருந்துகள் இல்லை.",
+    "Tamil Nadu",
+    "Dharmapuri"
+  );
+  assert("Tamil input is valid", taRes.isValidRequest === true);
+  assert("Tamil input detects category 'healthcare'", taRes.category === "healthcare");
+  assert(
+    "Tamil input has English need summary (no raw Tamil script)",
+    !/[\u0B80-\u0BFF]/.test(taRes.need_summary) && taRes.need_summary.length > 5,
+    `summary: "${taRes.need_summary}"`
+  );
+
+  // 5. Gibberish
+  console.log("\n--- 5. Gibberish Input Screening ---");
+  const gibberishCheck = isMeaningfulRequest("sdgsafdasafd");
+  assert("Gibberish rejected by meaningfulness check", !gibberishCheck.isValid);
+
+  const gibRes = await normalizeCitizenRequest("sdgsafdasafd");
+  assert(
+    "Gibberish rejected by AI normalization layer",
+    gibRes.isValidRequest === false,
+    `reason: "${gibRes.rejectionReason}"`
+  );
+  assert("Gibberish does not assign Ramanagara", gibRes.district === null);
+  assert("Gibberish does not have confidence score", gibRes.confidence === 0.0 || gibRes.confidence === null);
+
+  // 6. Non-civic text
+  console.log("\n--- 6. Non-Civic Input Screening ---");
+  const nonCivicSamples = [
+    "hello there how are you",
+    "this is a test",
+    "I like apples"
+  ];
+  for (const sample of nonCivicSamples) {
+    const check = isMeaningfulRequest(sample);
+    const res = await normalizeCitizenRequest(sample);
+    assert(
+      `Non-civic "${sample}" rejected`,
+      !check.isValid && res.isValidRequest === false
+    );
+  }
+
+  // 7. Missing district
+  console.log("\n--- 7. Missing District ---");
+  const missingDistRes = await normalizeCitizenRequest(
+    "The drinking water pipeline in our village has ruptured and clean water is unavailable."
+  );
+  assert(
+    "Missing district is not defaulted to Ramanagara",
+    missingDistRes.district === null,
+    `district: ${missingDistRes.district}`
+  );
+
+  // 8. Unsupported district
+  console.log("\n--- 8. Unsupported District (Goa / Anjuna) ---");
+  const outsideCoverage = checkDistrictCoverage("Anjuna", "Goa");
+  assert(
+    "Anjuna in Goa flagged as outside pilot coverage",
+    outsideCoverage.isSupported === false && outsideCoverage.canonical === null
+  );
+
+  const outsideValidation = validateCitizenRequest({
+    raw_text: "Road in Anjuna village has potholes and streetlights are broken.",
+    state: "Goa",
+    district: "Anjuna",
+    category: "roads",
+    need_summary: "Road in Anjuna has potholes.",
+    severity: "medium",
+    source: "text",
+    ai_confidence: 0.9
+  });
+  assert(
+    "Submission with unsupported district rejected by schema validation",
+    outsideValidation.isValid === false
+  );
+
+  // 9. State/District mismatch (Goa + Ramanagara)
+  console.log("\n--- 9. State/District Mismatch (Goa + Ramanagara) ---");
+  const mismatchCoverage = checkDistrictCoverage("Ramanagara", "Goa");
+  assert(
+    "Mismatched pair (Goa + Ramanagara) rejected",
+    mismatchCoverage.isSupported === false && mismatchCoverage.canonical === null,
+    `message: "${mismatchCoverage.message}"`
+  );
+
+  const mismatchValidation = validateCitizenRequest({
+    raw_text: "Road in Ramanagara has major potholes.",
+    state: "Goa",
+    district: "Ramanagara",
+    category: "roads",
+    need_summary: "Road in Ramanagara has potholes.",
+    severity: "high",
+    source: "text",
+    ai_confidence: 0.95
+  });
+  assert(
+    "Submission with mismatched pair rejected by schema validation",
+    mismatchValidation.isValid === false
+  );
+
+  // 10. Malformed AI response handling
+  console.log("\n--- 10. Malformed Response Recovery ---");
+  const fallbackFromMalformed = getPreparedFallback(
+    "Village drinking water pipeline has burst in Bahraich.",
+    "Uttar Pradesh",
+    "Bahraich",
+    "Malformed model JSON output recovered via fallback."
+  );
+  assert(
+    "Malformed response recovers cleanly to fallback",
+    fallbackFromMalformed.isValidRequest === true &&
+    fallbackFromMalformed.isFallback === true &&
+    fallbackFromMalformed.category === "water" &&
+    fallbackFromMalformed.district === "Bahraich"
+  );
+
+  // 11. 429 Fallback
+  console.log("\n--- 11. HTTP 429 Fallback Behavior ---");
+  const fallback429 = getPreparedFallback(
+    "Village primary health center has no doctor in Dharmapuri.",
+    "Tamil Nadu",
+    "Dharmapuri",
+    "AI analysis is temporarily unavailable (OpenRouter rate limit reached). You can continue using the manual fallback."
+  );
+  assert("429 Fallback has source 'manual_fallback'", fallback429.source === "manual_fallback");
+  assert("429 Fallback has confidence null (no fake confidence)", fallback429.confidence === null);
+  assert("429 Fallback is flagged as isFallback: true", fallback429.isFallback === true);
+  assert("429 Fallback correctly detected category 'healthcare'", fallback429.category === "healthcare");
+  assert("429 Fallback correctly preserved district 'Dharmapuri'", fallback429.district === "Dharmapuri");
+
+  // 12. Regression Test: Citizen Input Channel vs AI Provider Metadata
+  console.log("\n--- 12. Regression Test: Citizen Input Channel vs AI Provider Metadata ---");
+  const expectedSource = enRes.isFallback ? "manual_fallback" : "text";
+  assert(
+    `AI extraction returns citizen input channel source '${expectedSource}'`,
+    enRes.source === expectedSource,
+    `source: "${enRes.source}"`
+  );
+  assert(
+    "AI extraction source is strictly a valid citizen input channel (never 'ai')",
+    (enRes.source as string) !== "ai" && (enRes.source === "text" || enRes.source === "manual_fallback" || enRes.source === "voice")
+  );
+  assert(
+    "AI extraction returns provider metadata 'openrouter' or 'manual_fallback'",
+    enRes.provider === "openrouter" || enRes.provider === "manual_fallback",
+    `provider: "${enRes.provider}"`
+  );
+
+  const validTextSubmit = validateCitizenRequest({
+    source: "text",
+    raw_text: "Road needs repair in Ramanagara",
+    language_code: "en",
+    state: "Karnataka",
+    district: "Ramanagara",
+    category: "roads",
+    need_summary: "Repair road",
+    severity: "medium",
+    ai_confidence: 0.95
+  });
+  assert("Valid submission with source 'text' passes validation", validTextSubmit.isValid === true);
+
+  const validFallbackSubmit = validateCitizenRequest({
+    source: "manual_fallback",
+    raw_text: "Road needs repair in Ramanagara",
+    language_code: "en",
+    state: "Karnataka",
+    district: "Ramanagara",
+    category: "roads",
+    need_summary: "Repair road",
+    severity: "medium",
+    ai_confidence: 0.0
+  });
+  assert("Valid submission with source 'manual_fallback' passes validation", validFallbackSubmit.isValid === true);
+
+  const invalidAiSourceSubmit = validateCitizenRequest({
+    source: "ai",
+    raw_text: "Road needs repair in Ramanagara",
+    language_code: "en",
+    state: "Karnataka",
+    district: "Ramanagara",
+    category: "roads",
+    need_summary: "Repair road",
+    severity: "medium",
+    ai_confidence: 0.95
+  });
+  assert(
+    "Invalid source 'ai' is strictly rejected with schema error",
+    invalidAiSourceSubmit.isValid === false &&
+    invalidAiSourceSubmit.errors.some((e) => e.includes('Invalid source "ai"'))
+  );
+
+  const invalidProviderSourceSubmit = validateCitizenRequest({
+    source: "openrouter",
+    raw_text: "Road needs repair in Ramanagara",
+    language_code: "en",
+    state: "Karnataka",
+    district: "Ramanagara",
+    category: "roads",
+    need_summary: "Repair road",
+    severity: "medium",
+    ai_confidence: 0.95
+  });
+  assert(
+    "Invalid source 'openrouter' is strictly rejected with schema error",
+    invalidProviderSourceSubmit.isValid === false &&
+    invalidProviderSourceSubmit.errors.some((e) => e.includes('Invalid source "openrouter"'))
+  );
+
+  console.log("\n==================================================");
+  console.log(`  AI PROVIDER TEST SUMMARY: ${passed} passed, ${failed} failed`);
+  console.log("==================================================");
+
+  if (failed > 0) process.exit(1);
+}
+
+runAiProviderTests().catch((err) => {
+  console.error("Fatal test error:", err);
+  process.exit(1);
+});

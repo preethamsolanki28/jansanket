@@ -570,7 +570,7 @@ export function DashboardView() {
             <strong>Unaddressed Need:</strong> Baseline deficit weighted by uncommitted planned investment: <code className="font-mono bg-white px-1 py-0.5 rounded border">need * (1 - current_coverage / 100)</code>.
           </p>
           <p>
-            <strong>Priority Score:</strong> 40% Citizen Demand + 30% Infrastructure Need + 15% People Affected + 15% Unaddressed Need. Gemini translates and structures citizen language; deterministic application code computes the planning score.
+            <strong>Priority Score:</strong> 40% Citizen Demand + 30% Infrastructure Need + 15% People Affected + 15% Unaddressed Need. AI translates and structures citizen language; deterministic application code computes the planning score.
           </p>
         </CardContent>
       </Card>

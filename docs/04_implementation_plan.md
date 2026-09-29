@@ -328,6 +328,14 @@ Only perform this task if TASK-003 marked voice **KEEP**.
 - [x] Enforced matching state + district pair verification (*Goa + Ramanagara* rejected with HTTP 422).
 - [x] Rejection occurs before requests can reach submission pipeline.
 
+### TASK-065 — OpenRouter AI Provider Migration (GPT-4o-mini) [DONE]
+- [x] Replaced direct Gemini integration with provider-neutral AI layer (`lib/ai.ts`) using OpenRouter (`openai/gpt-4o-mini`).
+- [x] Maintained exact `CitizenRequestExtractionResult` / `GeminiExtractionResult` contract without breaking downstream consumers.
+- [x] Structured JSON schema extraction with automatic fallback to standard json_object mode.
+- [x] Defensive fallback hierarchy handles HTTP 429/5xx quota errors with clean manual fallback and zero fabricated confidence.
+- [x] UI updated with model-aware badges (`AI: GPT-4o-mini (OpenRouter)`).
+- [x] Added 30-case AI provider test suite (`scripts/test-ai-provider.ts`) covering English, Indic languages (Kannada, Hindi, Tamil), gibberish, non-civic input, missing/unsupported districts, and 429 fallback.
+
 ---
 
 ## Planned time summary

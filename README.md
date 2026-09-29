@@ -74,9 +74,9 @@ flowchart TD
 ### Responsibility Boundary
 | Component | Responsibility |
 | :--- | :--- |
-| **Google Gemini 3.8 Flash** | Unstructured language understanding $\rightarrow$ structured field extraction (`language`, `district`, `category`, `need_summary`, `severity`). |
+| **OpenRouter (openai/gpt-4o-mini)** | Unstructured language understanding $\rightarrow$ structured field extraction (`language`, `district`, `category`, `need_summary`, `severity`, `confidence`). |
 | **Application Logic** | Input screening, strict schema validation, canonical district mapping, database persistence, and **deterministic priority calculation**. |
-| **Strict Boundary Rule** | **Gemini NEVER calculates priority scores, allocates budgets, or approves projects.** |
+| **Strict Boundary Rule** | **AI NEVER calculates priority scores, allocates budgets, or approves projects.** |
 
 ---
 
@@ -85,7 +85,7 @@ flowchart TD
 - **Language:** TypeScript 5 (Strict Mode)
 - **Styling:** Tailwind CSS v4, Inter Typography (`next/font/google`), Civic design tokens
 - **UI Components:** shadcn/ui primitives (`Button`, `Card`, `Badge`, `Textarea`, `Alert`, `Table`)
-- **AI Integration:** Google Gemini API (`gemini-3.8-flash`) via server-side REST API with structured response schemas
+- **AI Integration:** OpenRouter API (`openai/gpt-4o-mini`) via server-side chat completions with structured JSON output
 - **Database:** Supabase Postgres (via PostgREST HTTP queries) with active fallback storage for local demonstration
 - **Deployment:** Vercel
 
@@ -95,7 +95,7 @@ flowchart TD
 
 ### Prerequisites
 - Node.js 18.18+ (tested on Node v20 and v24)
-- Google AI Studio API Key ([Get one here](https://aistudio.google.com/))
+- OpenRouter API Key ([Get one here](https://openrouter.ai/))
 
 ### 1. Clone & Install
 ```bash
@@ -110,9 +110,9 @@ cp .env.example .env.local
 ```
 Edit `.env.local`:
 ```env
-# Google Gemini API (Server Only — Never exposed to browser)
-GEMINI_API_KEY=your_gemini_api_key_here
-GEMINI_MODEL=gemini-3.8-flash
+# OpenRouter AI Configuration (Server Only — Never exposed to browser)
+OPENROUTER_API_KEY=your_openrouter_api_key_here
+AI_MODEL=openai/gpt-4o-mini
 
 # Optional: Supabase Postgres (If omitted, app runs smoothly in active demo store mode)
 NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
@@ -165,11 +165,11 @@ The automated smoke test verifies:
 1. **Dashboard Overview (0–8s):** Open `/dashboard`. Observe 52+ seeded requests across 8 pilot districts. Point out Rank #1 hotspot: **Ramanagara Roads** with priority score **79.7**.
 2. **Citizen Submission (8–20s):** Click **"Submit Request"**. In the **"Try an example"** section, click **"ಕನ್ನಡ (Roads - Ramanagara)"**:
    > *“ಮಳೆ ಬಂದಾಗ ನಮ್ಮ ಗ್ರಾಮದ ರಸ್ತೆ ಬಳಸಲು ಸಾಧ್ಯವಾಗುವುದಿಲ್ಲ, ರಾಮನಗರ ಜಿಲ್ಲೆಯ ಶಾಲೆಗೆ ಹೋಗಲು ಕಷ್ಟವಾಗುತ್ತಿದೆ.”*
-3. **AI Normalization & Purpose (20–32s):** Click **"Analyze Request"**. Point to the banner: *"Gemini converts the citizen's message into structured information so requests can be grouped and compared across districts."* Observe that Kannada was translated into a concise English need summary.
+3. **AI Normalization & Purpose (20–32s):** Click **"Analyze Request"**. Point to the banner: *"AI converts the citizen's message into structured information so requests can be grouped and compared across districts."* Observe that Kannada was translated into a concise English need summary.
 4. **Validation & Confirmation (32–42s):** Acknowledge the demo submission checkbox and click **"Confirm & Submit Request"**. A unique UUID is assigned and persisted. Click **"View Planning Signals"**.
 5. **Explain the Hotspot (42–60s):** On `/dashboard`, observe that **Ramanagara Roads** has updated dynamically (score jumps to **83.3**). Click the row to inspect **"Why This Area Needs Attention"**:
    $$0.40(100) + 0.30(78.0) + 0.15(72.0) + 0.15(60.8) = \mathbf{83.3}$$
-   Point out that Gemini structured the evidence, while pure deterministic code calculated the priority score.
+   Point out that AI structured the evidence, while pure deterministic code calculated the priority score.
 
 ---
 

@@ -23,7 +23,7 @@ export default function SubmitPage() {
           </Badge>
         </div>
         <p className="text-sm text-muted-foreground mt-1">
-          Describe an infrastructure need or public utility gap in your district. Requests are analyzed and normalized by Gemini to inform district planning priorities.
+          Describe an infrastructure need or public utility gap in your district. Requests are analyzed and normalized by AI to inform district planning priorities.
         </p>
       </div>
 

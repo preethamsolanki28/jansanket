@@ -220,7 +220,7 @@ async function runProductionSmokeTest() {
   // -------------------------------------------------------------------------
   // 5. Secret Leakage Audit
   // -------------------------------------------------------------------------
-  process.stdout.write("5. Auditing HTTP responses for secret exposure (GEMINI_API_KEY, Supabase secret)... ");
+  process.stdout.write("5. Auditing HTTP responses for secret exposure (OPENROUTER_API_KEY, GEMINI_API_KEY, Supabase secret)... ");
   try {
     const [dashRes, reqRes] = await Promise.all([
       request(`${BASE_URL}/api/dashboard`),
@@ -230,7 +230,7 @@ async function runProductionSmokeTest() {
       })
     ]);
 
-    const secretPattern = /AIza[0-9A-Za-z-_]{35}|eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9/g;
+    const secretPattern = /sk-or-v1-[0-9a-f]{64}|AIza[0-9A-Za-z-_]{35}|eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9/g;
     const dashLeaked = secretPattern.test(dashRes.raw);
     const reqLeaked = secretPattern.test(reqRes.raw);
 
@@ -397,6 +397,70 @@ async function runProductionSmokeTest() {
       passed++;
     } else {
       console.log("FAIL: Summary contained Indic characters or lacked English:", summary);
+      failed++;
+    }
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : "Error";
+    console.log(`FAIL: ${msg}`);
+    failed++;
+  }
+
+  // -------------------------------------------------------------------------
+  // 10. Regression Test: Source Contract ('text' | 'voice' | 'manual_fallback') vs 'ai'
+  // -------------------------------------------------------------------------
+  process.stdout.write("10. Verifying submission source contract ('text', 'manual_fallback') and rejection of 'ai'... ");
+  try {
+    // A. Submitting with invalid source "ai" must be rejected with HTTP 422
+    const invalidAiRes = await request(`${BASE_URL}/api/requests`, {
+      method: "POST",
+      body: {
+        action: "submit",
+        source: "ai",
+        requestData: {
+          raw_text: "Monsoon flooding has damaged village road in Ramanagara.",
+          language_code: "en",
+          district: "Ramanagara",
+          category: "roads",
+          need_summary: "Rebuild hospital approach road",
+          severity: "high",
+          ai_confidence: 0.95
+        }
+      }
+    });
+
+    const isRejected422 = invalidAiRes.status === 422;
+    const hasSourceError = invalidAiRes.body?.details?.some((d: string) => d.includes('Invalid source "ai"'));
+
+    // B. Submitting through valid text channel must succeed
+    const validTextRes = await request(`${BASE_URL}/api/requests`, {
+      method: "POST",
+      body: {
+        action: "submit",
+        source: "text",
+        requestData: {
+          source: "text",
+          raw_text: "Monsoon flooding has damaged village road in Ramanagara.",
+          language_code: "en",
+          district: "Ramanagara",
+          category: "roads",
+          need_summary: "Rebuild hospital approach road",
+          severity: "high",
+          ai_confidence: 0.95
+        }
+      }
+    });
+
+    const isValidSubmitted = validTextRes.status === 200 && validTextRes.body?.success && validTextRes.body?.request?.id;
+
+    if (isRejected422 && hasSourceError && isValidSubmitted) {
+      console.log("PASS (Source 'ai' rejected with HTTP 422, source 'text' successfully persisted)");
+      passed++;
+    } else {
+      console.log("FAIL: Expected source 'ai' rejection and source 'text' success:", {
+        isRejected422,
+        hasSourceError,
+        isValidSubmitted
+      });
       failed++;
     }
   } catch (err: unknown) {

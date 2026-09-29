@@ -13,9 +13,9 @@ flowchart LR
     A[Citizen Input<br/>Multilingual] --> B[Input Screening<br/>isMeaningfulRequest]
     B -->|Meaningless / Gibberish| X[HTTP 400 Reject<br/>No DB Write]
     B -->|Valid Problem| C[Next.js Server Route<br/>/api/requests]
-    C --> D[Gemini 3.8 Flash<br/>Server-Side Only]
+    C --> D[OpenRouter GPT-4o-mini<br/>lib/ai.ts]
     D -->|Success| E[Valid AI Result<br/>AI Confidence & English Translation]
-    D -.->|HTTP 429 Quota| F[Valid Manual Fallback<br/>Zero Fake Confidence]
+    D -.->|HTTP 429 / Outage| F[Valid Manual Fallback<br/>Zero Fake Confidence]
     E --> G[Strict Schema & Coverage<br/>lib/validation.ts]
     F --> G
     G --> H[Persistence Layer<br/>lib/db.ts]
@@ -26,9 +26,9 @@ flowchart LR
 
 ### 1. Three Distinct Intake States
 - **State 1: VALID AI RESULT**
-  - Trigger: Successful Gemini 3.8 Flash analysis.
-  - UI: Displays *Analyzed by Gemini 3.8 Flash* badge, genuine AI confidence (e.g. 94%), original citizen text, and an English normalized summary.
-  - Explanatory banner explains Gemini's role in structuring citizen language for district aggregation (and clarifies that Gemini does NOT calculate priority scores).
+  - Trigger: Successful OpenRouter (`openai/gpt-4o-mini`) analysis via structured JSON.
+  - UI: Displays *AI: GPT-4o-mini (OpenRouter)* badge, genuine AI confidence (e.g. 94%), original citizen text, and an English normalized summary.
+  - Explanatory banner explains AI's role in structuring citizen language for district aggregation (and clarifies that AI does NOT calculate priority scores).
 - **State 2: VALID MANUAL FALLBACK**
   - Trigger: Gemini HTTP 429 quota exhaustion or backend timeout.
   - UI: Displays *Manual Fallback Review (AI Unavailable)* badge and *AI Confidence: Not Available* (**zero fake confidence**).
@@ -77,23 +77,14 @@ flowchart LR
 
 ---
 
-## Gemini 429 Investigation Findings
-- **API Model:** `gemini-3.8-flash` via Google Generative Language REST API (`/v1beta/models/gemini-3.8-flash:generateContent`).
-- **Configuration:** `GEMINI_API_KEY` is correctly configured in `.env.local`.
-- **Root Cause of HTTP 429:** The Google Cloud project associated with this key is on the Free Tier, with a strict quota limit of **20 requests per day** (`generativelanguage.googleapis.com/generate_content_free_tier_requests`, quota: 20).
-- **No Request Duplication:** Verified zero accidental request duplication, zero infinite retry loops, and single-click execution.
-- **Defensive Behavior:** The platform handles the quota limit via the clean, honest manual fallback path without faking AI confidence or hallucinating Ramanagara defaults.
-
----
-
 ## Current Stack
 - **Framework:** Next.js 16.3.6 (App Router, Turbopack)
 - **Language:** TypeScript 5 (Strict Mode)
 - **Styling:** Tailwind CSS v4, Inter font (`next/font/google`), civic tokens from `docs/03_design.md`
 - **UI Components:** shadcn/ui primitives (`Button`, `Card`, `Badge`, `Textarea`, `Alert`, `Table`)
-- **AI Model:** `gemini-3.8-flash` via server-side Google Generative Language REST API
+- **AI Model:** `openai/gpt-4o-mini` via OpenRouter OpenAI-compatible chat completions API (with `lib/ai.ts` provider abstraction)
 - **Database:** Supabase Postgres (with PostgREST HTTP queries and active demo store fallback)
-- **Testing:** Standalone verification suites (`scripts/smoke-test.ts` with 9/9 automated checks)
+- **Testing:** Standalone verification suites (`scripts/smoke-test.ts` with 9/9 automated checks, `scripts/test-ai-provider.ts` with 30/30 checks)
 
 ---
 
@@ -108,6 +99,7 @@ flowchart LR
 - **D006:** `DEMO_MODE=true` and unconfigured Supabase mode gracefully fall back to active memory fixtures without throwing unhandled exceptions.
 - **D007 (Post-M5):** 3-state pipeline guarantees: invalid input is rejected with HTTP 400; manual fallback shows zero fake confidence; unsupported districts and mismatched state-district pairs are never silently altered.
 - **D008 (Post-M5):** Database security: client writes must traverse server route; anon INSERT policy removed; Supabase write failure returns HTTP 503 instead of false success.
+- **D009 (AI Provider Migration):** AI extraction is abstracted into `normalizeCitizenRequest(...)` in `lib/ai.ts`, powered by OpenRouter + `openai/gpt-4o-mini` with strict structured outputs, falling back to clean manual review on provider rate limits or errors.
 
 ---
 
@@ -124,11 +116,12 @@ flowchart LR
 ---
 
 ## Guidelines for Future Coding Agents
-1. **Never expose secrets:** `GEMINI_API_KEY` and `SUPABASE_SERVICE_ROLE_KEY` must never be prefixed with `NEXT_PUBLIC_` or passed to client components.
-2. **Never let Gemini compute priority scores:** Priority calculation must remain pure, deterministic TypeScript in `lib/priority.ts`.
-3. **Preserve Fallbacks:** Always keep `getPreparedFallback()` in `lib/gemini.ts` and `localRequestStore` in `lib/db.ts` so rate-limited API keys never break user flows or automated tests.
+1. **Never expose secrets:** `OPENROUTER_API_KEY`, `GEMINI_API_KEY`, and `SUPABASE_SERVICE_ROLE_KEY` must never be prefixed with `NEXT_PUBLIC_` or passed to client components.
+2. **Never let AI compute priority scores:** Priority calculation must remain pure, deterministic TypeScript in `lib/priority.ts`.
+3. **Preserve Fallbacks:** Always keep `getPreparedFallback()` in `lib/ai.ts` and `localRequestStore` in `lib/db.ts` so rate-limited API keys never break user flows or automated tests.
 4. **Before committing changes, run:**
    ```bash
    npm run lint && npm run typecheck && npm run build
+   npx tsx scripts/test-ai-provider.ts
    npx tsx scripts/smoke-test.ts
    ```

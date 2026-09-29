@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { normalizeRequestWithGemini } from "@/lib/gemini";
+import { normalizeCitizenRequest } from "@/lib/ai";
 import { validateCitizenRequest, isMeaningfulRequest } from "@/lib/validation";
 import { persistCitizenRequest } from "@/lib/db";
 
@@ -8,7 +8,7 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
     const { action = "analyze", rawText, stateHint, districtHint, requestData, source } = body;
 
-    // 1. Analyze Action: Normalize unstructured citizen request via Gemini 3.8 Flash
+    // 1. Analyze Action: Normalize unstructured citizen request via AI layer (OpenRouter GPT-4o-mini)
     if (action === "analyze") {
       const meaning = isMeaningfulRequest(rawText);
       if (!meaning.isValid) {
@@ -22,7 +22,7 @@ export async function POST(req: NextRequest) {
         );
       }
 
-      const extraction = await normalizeRequestWithGemini(rawText.trim(), stateHint, districtHint);
+      const extraction = await normalizeCitizenRequest(rawText.trim(), stateHint, districtHint);
 
       if (!extraction.isValidRequest) {
         return NextResponse.json(

@@ -6,12 +6,12 @@ JanSanket is an AI-powered Digital Public Good prototype that converts multiling
 
 ## Fixed stack
 
-- Next.js
+- Next.js (App Router, Turbopack)
 - TypeScript
 - shadcn/ui
 - Tailwind CSS
-- Supabase: Postgres, Auth, Storage, pgvector
-- Gemini API
+- Supabase: Postgres (PostgREST HTTP queries)
+- AI Provider: OpenRouter (`openai/gpt-4o-mini`) via server-side chat completions
 - Vercel
 - Python/FastAPI on Render only if a proven blocker makes it necessary; default is no Python backend
 
@@ -29,7 +29,8 @@ Ask when anything is ambiguous.
 
 - Text is the guaranteed citizen-intake path with 1-click multilingual presets (voice was evaluated in TASK-003 and cut due to mobile latency/permissions).
 - Voice is optional and must not block the text flow.
-- Gemini interprets unstructured input; deterministic application logic computes the planning signal.
+- AI interprets unstructured input; deterministic application logic computes the planning signal.
+- AI never calculates priority scores, allocates budgets, or approves projects.
 - District context is keyed by `state + district + category`.
 - Demo context values are labelled synthetic.
 - No authentication is required for the MVP.
