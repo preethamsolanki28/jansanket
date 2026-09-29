@@ -27,22 +27,24 @@ State and national infrastructure planning teams across India struggle to consol
 
 ```mermaid
 flowchart TD
-    Citizen[Citizen Intake /submit] --> IntakeAI[OpenRouter GPT-4o-mini<br/>Language & Field Extraction]
-    IntakeAI --> Identification[State + District Identification<br/>Auto-detected or User Input]
-    Identification --> GeoVal[Deterministic Geographic Validation<br/>lib/india-locations.ts]
-    GeoVal -->|Valid State + District| Stored[Citizen Request Stored in Database<br/>lib/db.ts]
-    GeoVal -->|State/District Mismatch| Reject[HTTP 422 Rejection<br/>Clear Mismatch Message]
-    
-    Stored --> IsPilot{"Is district in pilot set?<br/>(8 Pilot Districts)"}
-    IsPilot -- Yes --> Priority[Deterministic Priority Engine<br/>lib/priority.ts]
-    Priority --> Hotspot[High-Need Areas Hotspots Table<br/>lib/priority.ts]
-    
-    IsPilot -- No --> Outside[Stored as Outside Pilot Coverage<br/>No Fabricated Score]
-    
-    Hotspot --> DASH[/dashboard<br/>Planner Dashboard]
-    Outside --> DASH_ALL[All Citizen Requests Section<br/>Complete Request Visibility]
-    Stored --> DASH_ALL
-    DASH_ALL --> DASH
+    Citizen["Citizen Intake /submit"] --> AI["OpenRouter GPT-4o-mini<br/>Language and Field Extraction"]
+    AI --> Location["State and District Identification<br/>Auto-detected or User Input"]
+    Location --> Geo["Deterministic Geographic Validation"]
+
+    Geo -->|Valid| Stored["Citizen Request Stored in Database"]
+    Geo -->|Mismatch| Reject["Reject Invalid State-District Pair"]
+
+    Stored --> Pilot{"Is district in 8-district pilot?"}
+
+    Pilot -->|Yes| Priority["Deterministic Priority Engine"]
+    Pilot -->|No| Outside["Outside Pilot Coverage<br/>No Fabricated Score"]
+
+    Priority --> Hotspot["High-Need Areas"]
+    Hotspot --> Dashboard["Planner Dashboard"]
+
+    Stored --> AllRequests["All Citizen Requests"]
+    Outside --> AllRequests
+    AllRequests --> Dashboard
 ```
 
 ### Responsibility Boundary
