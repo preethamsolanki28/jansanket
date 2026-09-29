@@ -27,7 +27,7 @@ State and national infrastructure planning teams across India struggle to consol
 
 ```mermaid
 flowchart TD
-    Citizen["Citizen Intake /submit"] --> AI["OpenRouter GPT-4o-mini<br/>Language and Field Extraction"]
+    Citizen["Citizen Intake /submit"] --> AI["Google Gemini (gemini-3.5-flash-lite)<br/>Language and Field Extraction"]
     AI --> Location["State and District Identification<br/>Auto-detected or User Input"]
     Location --> Geo["Deterministic Geographic Validation"]
 
@@ -50,7 +50,7 @@ flowchart TD
 ### Responsibility Boundary
 | Component | Responsibility |
 | :--- | :--- |
-| **OpenRouter (openai/gpt-4o-mini)** | Unstructured language understanding $\rightarrow$ structured field extraction (`language`, `district`, `category`, `need_summary`, `severity`, `confidence`). |
+| **Google Gemini (gemini-3.5-flash-lite)** | Unstructured language understanding $\rightarrow$ structured field extraction (`language`, `district`, `category`, `need_summary`, `severity`, `confidence`). |
 | **Application Logic** | Input screening, strict schema validation, canonical district mapping, database persistence, and **deterministic priority calculation**. |
 | **Strict Boundary Rule** | **AI NEVER calculates priority scores, allocates budgets, or approves projects.** |
 
@@ -61,7 +61,7 @@ flowchart TD
 - **Language:** TypeScript 5 (Strict Mode)
 - **Styling:** Tailwind CSS v4, Inter Typography (`next/font/google`), Civic design tokens
 - **UI Components:** shadcn/ui primitives (`Button`, `Card`, `Badge`, `Textarea`, `Alert`, `Table`)
-- **AI Integration:** OpenRouter API (`openai/gpt-4o-mini`) via server-side chat completions with structured JSON output
+- **AI Integration:** Google Gemini API (`gemini-3.5-flash-lite`) via server-side REST integration with structured JSON output
 - **Database:** Supabase Postgres (via PostgREST HTTP queries) with active fallback storage for local demonstration
 - **Deployment:** Vercel
 
@@ -71,7 +71,7 @@ flowchart TD
 
 ### Prerequisites
 - Node.js 18.18+ (tested on Node v20 and v24)
-- OpenRouter API Key ([Get one here](https://openrouter.ai/))
+- Google Gemini API Key ([Get one at Google AI Studio](https://aistudio.google.com/app/apikey))
 
 ### 1. Clone & Install
 ```bash
@@ -86,9 +86,9 @@ cp .env.example .env.local
 ```
 Edit `.env.local`:
 ```env
-# OpenRouter AI Configuration (Server Only — Never exposed to browser)
-OPENROUTER_API_KEY=your_openrouter_api_key_here
-AI_MODEL=openai/gpt-4o-mini
+# Google Gemini AI Configuration (Server Only — Never exposed to browser)
+GEMINI_API_KEY=your_gemini_api_key_here
+GEMINI_MODEL=gemini-3.5-flash-lite
 
 # Optional: Supabase Postgres (If omitted, app runs smoothly in active demo store mode)
 NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
@@ -158,7 +158,7 @@ code-for-communities/
 │   ├── dashboard/page.tsx           # Planner dashboard page
 │   ├── submit/page.tsx              # Citizen intake page
 │   └── api/
-│       ├── requests/route.ts        # POST: analyze (OpenRouter) & submit (persistence)
+│       ├── requests/route.ts        # POST: analyze (Google Gemini) & submit (persistence)
 │       └── dashboard/route.ts       # GET: aggregated planning signals, KPIs & all requests
 ├── components/
 │   ├── dashboard-view.tsx           # Interactive dashboard, KPI cards, hotspot detail & All Requests table
@@ -166,7 +166,7 @@ code-for-communities/
 │   ├── navigation.tsx               # Top header with demo_synthetic badge
 │   └── ui/                          # shadcn primitives (button, card, alert, table)
 ├── lib/
-│   ├── ai.ts                        # Server-side OpenRouter (GPT-4o-mini) client + manual fallback
+│   ├── ai.ts                        # Server-side Google Gemini client + manual fallback
 │   ├── india-locations.ts           # 28 States, 8 UTs, static district validation & aliases
 │   ├── validation.ts                # Meaningfulness screening, schema & geographic validation
 │   ├── priority.ts                  # Deterministic priority formula & project mapping

@@ -328,12 +328,10 @@ Only perform this task if TASK-003 marked voice **KEEP**.
 - [x] Enforced matching state + district pair verification (*Goa + Ramanagara* rejected with HTTP 422).
 - [x] Rejection occurs before requests can reach submission pipeline.
 
-### TASK-065 — OpenRouter AI Provider Migration (GPT-4o-mini) [DONE]
-- [x] Replaced direct Gemini integration with provider-neutral AI layer (`lib/ai.ts`) using OpenRouter (`openai/gpt-4o-mini`).
+### TASK-065 — Provider-Neutral AI Abstraction [DONE]
+- [x] Created provider-neutral AI layer (`lib/ai.ts`) standardizing request normalization interface.
 - [x] Maintained exact `CitizenRequestExtractionResult` / `GeminiExtractionResult` contract without breaking downstream consumers.
-- [x] Structured JSON schema extraction with automatic fallback to standard json_object mode.
-- [x] Defensive fallback hierarchy handles HTTP 429/5xx quota errors with clean manual fallback and zero fabricated confidence.
-- [x] UI updated with model-aware badges (`AI: GPT-4o-mini (OpenRouter)`).
+- [x] Structured JSON schema extraction with defensive fallback hierarchy for HTTP 429/5xx quota errors.
 - [x] Added 30-case AI provider test suite (`scripts/test-ai-provider.ts`) covering English, Indic languages (Kannada, Hindi, Tamil), gibberish, non-civic input, missing/unsupported districts, and 429 fallback.
 
 ### TASK-066 — UX & Data-Scope Expansion (India-Wide Intake + All Requests Log) [DONE]
@@ -346,6 +344,14 @@ Only perform this task if TASK-003 marked voice **KEEP**.
 - [x] Separated citizen intake from pilot analytics: outside-pilot requests are stored faithfully as *"Outside Pilot Coverage"* without fabricating context metrics or priority scores.
 - [x] Expanded `/dashboard` and `/api/dashboard` with an **All Citizen Requests** table displaying all 52+ recorded requests with pilot status badges alongside the 8-district pilot hotspot ranking.
 - [x] Updated automated smoke test suite to 11/11 passing tests (`scripts/smoke-test.ts`).
+
+### TASK-067 — Google Gemini Primary AI Migration (gemini-3.5-flash-lite) [DONE]
+- [x] Integrated Google Gemini (`gemini-3.5-flash-lite`) as primary and sole active AI extraction provider to satisfy official hackathon requirement.
+- [x] Implemented server-side Google Generative Language REST API integration with native `responseSchema` structured JSON enforcement.
+- [x] Removed OpenRouter from active request flow.
+- [x] Removed AI provider details and model names from citizen `/submit` UI for clean civic experience.
+- [x] Implemented transparent manual fallback on Gemini HTTP 429 quota exhaustion or temporary outage with zero fake confidence.
+- [x] Preserved deterministic geographic validation, India-wide intake, and unchanged deterministic priority scoring formula.
 
 ---
 

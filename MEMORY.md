@@ -10,7 +10,7 @@ JanSanket is an AI-powered Digital Public Good prototype that converts multiling
 ### Implemented Workflow
 ```mermaid
 flowchart TD
-    Citizen[Citizen Intake /submit] --> IntakeAI[OpenRouter GPT-4o-mini<br/>Language & Field Extraction]
+    Citizen[Citizen Intake /submit] --> IntakeAI[Google Gemini gemini-3.5-flash-lite<br/>Language & Field Extraction]
     IntakeAI --> Identification[State + District Identification<br/>Auto-detected or User Input]
     Identification --> GeoVal[Deterministic Geographic Validation<br/>lib/india-locations.ts]
     GeoVal -->|Valid State + District| Stored[Citizen Request Stored in Database<br/>lib/db.ts]
@@ -30,9 +30,8 @@ flowchart TD
 
 ### 1. Three Distinct Intake States
 - **State 1: VALID AI RESULT**
-  - Trigger: Successful OpenRouter (`openai/gpt-4o-mini`) analysis via structured JSON.
-  - UI: Displays *AI: GPT-4o-mini (OpenRouter)* badge, genuine AI confidence (e.g. 94%), original citizen text, and an English normalized summary.
-  - Simplified citizen UX: Removed technical AI pipeline explainer box so citizens focus on what they submitted, what was understood, and validation status.
+  - Trigger: Successful Google Gemini (`gemini-3.5-flash-lite`) analysis via native structured JSON schema enforcement (`generationConfig.responseSchema`).
+  - UI: Displays clean citizen-friendly *"What We Understood"* panel with genuine AI confidence (e.g. 94%), original citizen text, and an English normalized summary. AI provider and model names are intentionally hidden from the citizen interface.
 - **State 2: VALID MANUAL FALLBACK**
   - Trigger: HTTP 429 quota exhaustion or backend timeout.
   - UI: Displays *Manual Fallback Review (AI Unavailable)* badge and *AI Confidence: Not Available* (**zero fake confidence**).
@@ -91,7 +90,7 @@ flowchart TD
 - **Language:** TypeScript 5 (Strict Mode)
 - **Styling:** Tailwind CSS v4, Inter font (`next/font/google`), civic tokens from `docs/03_design.md`
 - **UI Components:** shadcn/ui primitives (`Button`, `Card`, `Badge`, `Textarea`, `Alert`, `Table`)
-- **AI Model:** `openai/gpt-4o-mini` via OpenRouter OpenAI-compatible chat completions API (with `lib/ai.ts` provider abstraction)
+- **AI Model:** `gemini-3.5-flash-lite` via Google Gemini REST API (`lib/ai.ts` with structured `responseSchema`)
 - **Database:** Supabase Postgres (with PostgREST HTTP queries and active demo store fallback)
 - **Testing:** Standalone verification suites (`scripts/smoke-test.ts` with 9/9 automated checks, `scripts/test-ai-provider.ts` with 30/30 checks)
 
@@ -108,13 +107,19 @@ flowchart TD
 - **D006:** `DEMO_MODE=true` and unconfigured Supabase mode gracefully fall back to active memory fixtures without throwing unhandled exceptions.
 - **D007 (Post-M5):** 3-state pipeline guarantees: invalid input is rejected with HTTP 400; manual fallback shows zero fake confidence; unsupported districts and mismatched state-district pairs are never silently altered.
 - **D008 (Post-M5):** Database security: client writes must traverse server route; anon INSERT policy removed; Supabase write failure returns HTTP 503 instead of false success.
-- **D009 (AI Provider Migration):** AI extraction is abstracted into `normalizeCitizenRequest(...)` in `lib/ai.ts`, powered by OpenRouter + `openai/gpt-4o-mini` with strict structured outputs, falling back to clean manual review on provider rate limits or errors.
+- **D009 (AI Abstraction):** AI extraction is abstracted into `normalizeCitizenRequest(...)` in `lib/ai.ts` with strict structured outputs, falling back to clean manual review on provider rate limits or errors.
 - **D010 (Post-M5 UX & Data-Scope Expansion):**
   - Removed "How JanSanket uses AI" box from `/submit` to keep the citizen flow focused strictly on civic intake.
   - Expanded citizen intake to **all 28 States and 8 UTs** across India.
   - Implemented deterministic static geographic validation (`lib/india-locations.ts`) avoiding unnecessary LLM calls for state-district lookups.
   - Separated intake from pilot analytics: non-pilot requests are stored faithfully as *"Outside Pilot Coverage"* without fabricating context metrics or priority scores.
   - Expanded `/dashboard` and `/api/dashboard` with an **All Citizen Requests** section providing complete visibility across all 52+ recorded requests alongside the 8-district pilot hotspot ranking.
+- **D011 (Google AI Requirement & Gemini Migration):**
+  - Migrated JanSanket to Google Gemini (`gemini-3.5-flash-lite`) as the sole and primary AI extraction provider to satisfy the official hackathon mandate ("All solutions must integrate Google AI").
+  - Model: `gemini-3.5-flash-lite` optimized for high-volume, cost-efficient multilingual extraction.
+  - Removed OpenRouter from the active request flow.
+  - AI provider details and model names are strictly hidden from the citizen `/submit` UI.
+  - On Gemini HTTP 429 quota exhaustion or temporary failure, the system transparently engages `manual_fallback` with zero fake confidence or hallucinated locations.
 
 ---
 
@@ -131,7 +136,7 @@ flowchart TD
 ---
 
 ## Guidelines for Future Coding Agents
-1. **Never expose secrets:** `OPENROUTER_API_KEY`, `GEMINI_API_KEY`, and `SUPABASE_SERVICE_ROLE_KEY` must never be prefixed with `NEXT_PUBLIC_` or passed to client components.
+1. **Never expose secrets:** `GEMINI_API_KEY` and `SUPABASE_SERVICE_ROLE_KEY` must never be prefixed with `NEXT_PUBLIC_` or passed to client components.
 2. **Never let AI compute priority scores:** Priority calculation must remain pure, deterministic TypeScript in `lib/priority.ts`.
 3. **Preserve Fallbacks:** Always keep `getPreparedFallback()` in `lib/ai.ts` and `localRequestStore` in `lib/db.ts` so rate-limited API keys never break user flows or automated tests.
 4. **Before committing changes, run:**

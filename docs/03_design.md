@@ -118,7 +118,7 @@ flowchart TD
 **"How this signal is calculated" Explainer Card:**
 - Full transparent mathematical formula in plain language:
   $$\text{Priority Score} = 0.40 \times \text{Demand} + 0.30 \times \text{Need} + 0.15 \times \text{People Affected} + 0.15 \times \text{Unaddressed Need}$$
-- Explicit separation note explaining that OpenRouter extracts citizen facts, while deterministic TypeScript calculates policy priority.
+- Explicit separation note explaining that Google Gemini extracts citizen facts, while deterministic TypeScript calculates policy priority.
 
 **All Citizen Requests Section:**
 - **Title:** *"All Citizen Requests"*
@@ -168,9 +168,9 @@ flowchart TD
 **The 3 Distinct Intake States:**
 
 1. **VALID AI RESULT:**
-   - Source: `text` (citizen channel), Provider: `openrouter` (`openai/gpt-4o-mini`).
-   - Header: *AI Extraction Preview* with *Analyzed by OpenRouter (GPT-4o-mini)* badge.
-   - Genuine AI Confidence percentage badge (e.g., *AI Confidence: 94%*).
+   - Source: `text` (citizen channel), Provider: `gemini` (`gemini-3.5-flash-lite`).
+   - Header: *What We Understood* (citizen UI intentionally hides AI provider/model badges to keep interface civic and clean).
+   - Genuine AI Confidence badge (e.g., *Confidence: 94%*).
    - Shows original text in citizen's script and *What We Understood (English Summary)*.
    - User verifies category, severity, state, and district before confirming.
 

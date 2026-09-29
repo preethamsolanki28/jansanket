@@ -2,7 +2,7 @@
 
 ## 1. Core Architectural Non-Negotiables
 1. **Responsibility Separation:**
-   - **AI Responsibility (OpenRouter GPT-4o-mini):** Unstructured citizen input $\rightarrow$ structured fields (`language`, `state`, `district`, `category`, `need_summary`, `severity`, `confidence`).
+   - **AI Responsibility (Google Gemini gemini-3.5-flash-lite):** Unstructured citizen input $\rightarrow$ structured fields (`language`, `state`, `district`, `category`, `need_summary`, `severity`, `confidence`).
    - **Application Responsibility:** Strict schema validation, deterministic geographic validation (`lib/india-locations.ts`), database persistence, and **deterministic priority calculation**.
    - **Never let AI calculate the priority score, allocate budgets, or approve projects.**
    - **Never spend LLM calls on static geographic validation:** State-district validation must be deterministic.
@@ -13,21 +13,23 @@
    - Never default or force district to Ramanagara when district is unspecified; prompt the user.
 3. **Citizen Channel vs. AI Provider:**
    - `source` represents the citizen input channel (`text`, `voice`, `manual_fallback`). Never put `"ai"` or provider names in `source`.
-   - `provider` tracks the AI provider (`openrouter`, `manual_fallback`).
-4. **Security & Secrets:**
-   - Never expose `OPENROUTER_API_KEY` or `SUPABASE_SERVICE_ROLE_KEY` to the client browser.
+   - `provider` tracks the AI provider (`gemini`, `manual_fallback`).
+4. **Citizen UI Privacy (No Provider Exposure):**
+   - The citizen-facing `/submit` page must NOT display AI provider names (e.g., Gemini, OpenRouter) or model badges. Keep the UI clean, civic, and focused on verifying "What We Understood".
+5. **Security & Secrets:**
+   - Never expose `GEMINI_API_KEY` or `SUPABASE_SERVICE_ROLE_KEY` to the client browser.
    - Never prefix server secrets with `NEXT_PUBLIC_`.
    - Never commit `.env`, `.env.local`, API keys, or credentials.
-5. **Database Write Path:**
+6. **Database Write Path:**
    - Browsers must never write directly to Supabase. Next.js server routes (`app/api/requests/route.ts`) own persistence.
    - All input must be validated server-side via `validateCitizenRequest()` in `lib/validation.ts`. Invalid model output must be rejected with HTTP 422.
-6. **Data Integrity & Provenance:**
+7. **Data Integrity & Provenance:**
    - District context is strictly keyed by `state + district + category`.
    - All baseline demonstration metrics must be labeled `demo_synthetic`. Never present synthetic demo values as official government statistics.
    - No PII: Do not collect or store Aadhaar numbers, phone numbers, personal names, or exact home addresses.
-7. **Resiliency & Fallbacks:**
+8. **Resiliency & Fallbacks:**
    - `DEMO_MODE=true` and unconfigured Supabase mode must gracefully fall back to active memory fixtures without throwing unhandled exceptions.
-   - Always preserve `getPreparedFallback()` in `lib/ai.ts` so AI quota limits (429) or outages (503) never trap the user.
+   - Always preserve `getPreparedFallback()` in `lib/ai.ts` so Gemini quota limits (HTTP 429) or temporary API failures transparently transition to manual fallback without fabricating confidence or location.
 
 ---
 
@@ -36,7 +38,7 @@
    - Next.js (App Router, Turbopack)
    - TypeScript (Strict Mode)
    - Tailwind CSS v4 + shadcn/ui primitives
-   - AI Integration via server-side REST calls (OpenRouter `openai/gpt-4o-mini`)
+   - AI Integration via server-side REST calls (Google Gemini `gemini-3.5-flash-lite`)
    - Supabase Postgres
    - Do not install new libraries without explicit justification.
 2. **Visual Direction:**

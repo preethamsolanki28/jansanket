@@ -8,7 +8,7 @@
 | UI | shadcn/ui + Tailwind CSS v4 | Civic design tokens, accessible components (`Button`, `Card`, `Badge`, `Textarea`, `Select`, `Alert`, `Table`). |
 | Database | Supabase Postgres | Schema for `citizen_requests` and `district_context` with PostgREST server integration. |
 | Fallback Store | Active In-Memory / Seed Store | Seamless fallback for local demonstration when Supabase is offline or unconfigured (`DEMO_MODE=true`). |
-| AI Normalization | OpenRouter API (`openai/gpt-4o-mini` via `lib/ai.ts`) | Server-side OpenAI-compatible REST API integration for structured JSON extraction from multilingual text. |
+| AI Normalization | Google Gemini API (`gemini-3.5-flash-lite` via `lib/ai.ts`) | Server-side REST API integration with `responseSchema` for structured JSON extraction from multilingual text. |
 | Deployment | Vercel | Production Next.js serverless deployment. |
 | Backend | Next.js Route Handlers | Serverless API routes (`/api/requests`, `/api/dashboard`); avoids Python/FastAPI complexity. |
 | Voice | Cut during viability test | Evaluated in TASK-003 and cut due to mobile latency/permissions; text is the guaranteed path. |
@@ -23,7 +23,7 @@ The MVP uses the fixed stack without adding unnecessary external libraries. The 
 
 ```mermaid
 flowchart TD
-    Citizen[Citizen Intake /submit] --> IntakeAI[OpenRouter GPT-4o-mini<br/>Language & Field Extraction]
+    Citizen[Citizen Intake /submit] --> IntakeAI[Google Gemini gemini-3.5-flash-lite<br/>Language & Field Extraction]
     IntakeAI --> Identification[State + District Identification<br/>Auto-detected or User Input]
     Identification --> GeoVal[Deterministic Geographic Validation<br/>lib/india-locations.ts]
     GeoVal -->|Valid State + District| Stored[Citizen Request Stored in Database<br/>lib/db.ts]
@@ -57,7 +57,7 @@ code-for-communities/
 │   │   └── page.tsx                 # Citizen Intake page entry
 │   └── api/
 │       ├── requests/
-│       │   └── route.ts             # POST: analyze (OpenRouter) & submit (persistence)
+│       │   └── route.ts             # POST: analyze (Google Gemini) & submit (persistence)
 │       └── dashboard/
 │           └── route.ts             # GET: aggregated planning signals & KPIs
 ├── components/
@@ -66,7 +66,7 @@ code-for-communities/
 │   ├── navigation.tsx               # Top header with demo_synthetic badge
 │   └── ui/                          # shadcn primitives (button, card, table, etc.)
 ├── lib/
-│   ├── ai.ts                        # Provider-neutral AI client (OpenRouter GPT-4o-mini) + fallback
+│   ├── ai.ts                        # Google Gemini client (gemini-3.5-flash-lite) + manual fallback
 │   ├── india-locations.ts           # 28 States, 8 UTs, static district validation & aliases
 │   ├── gemini.ts                    # Backward-compatibility alias re-exporting lib/ai.ts
 │   ├── validation.ts                # Strict schema & semantic validation rules
@@ -97,7 +97,7 @@ code-for-communities/
 
 ## Architecture Rules & Security
 
-1. **AI is server-side only:** Never expose `OPENROUTER_API_KEY` to the browser.
+1. **AI is server-side only:** Never expose `GEMINI_API_KEY` to the browser.
 2. **AI interprets; deterministic code calculates:** The AI model must never decide the priority score, budget, or project approval.
 3. **No unnecessary PII:** Zero Aadhaar numbers, phone numbers, personal names, or exact home addresses are stored.
 4. **Server-side validation mandatory:** Client-side validation is for UX; `validateCitizenRequest()` enforces schema and semantic constraints on all incoming requests.
@@ -199,8 +199,8 @@ other      -> Further planning review required
   "extraction": {
     "isValidRequest": true,
     "source": "text",
-    "provider": "openrouter",
-    "modelUsed": "openai/gpt-4o-mini",
+    "provider": "gemini",
+    "modelUsed": "gemini-3.5-flash-lite",
     "language": "en",
     "originalText": "In Ramanagara, the road connecting our village to the main highway is washed out every monsoon.",
     "state": "Karnataka",
@@ -343,6 +343,6 @@ other      -> Further planning review required
 
 ## Defensive Fallback Hierarchy
 
-1. **AI API (OpenRouter) 429/503/Timeout:** Automatically invokes `getPreparedFallback()` with keyword classification and pilot location mapping; informs the citizen with an inline alert and allows manual adjustment.
+1. **AI API (Google Gemini) 429/503/Timeout:** Automatically invokes `getPreparedFallback()` with Indic keyword normalization and user location preservation; informs the citizen with an inline manual fallback alert and allows review without fabricating confidence or location.
 2. **Supabase Postgres Offline / Missing Credentials:** Persistence layer switches to `localRequestStore` initialized from seed fixtures, maintaining full UUID generation and dynamic signal updates.
 3. **Voice Input:** Cut after TASK-003 viability evaluation; text intake with 1-click multilingual test presets guarantees zero-latency execution.

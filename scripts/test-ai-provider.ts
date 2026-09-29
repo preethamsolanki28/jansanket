@@ -1,6 +1,6 @@
 /**
  * Comprehensive AI Provider Verification Suite
- * Tests OpenRouter + GPT-4o-mini provider abstraction and fallback paths:
+ * Tests Google Gemini (gemini-3.5-flash-lite) provider integration and fallback paths:
  * 1. Valid English request
  * 2. Kannada input (authentic Kannada text -> English summary)
  * 3. Hindi input (authentic Hindi text -> English summary)
@@ -21,6 +21,8 @@ import fs from "fs";
 import path from "path";
 import { normalizeCitizenRequest, getPreparedFallback } from "../lib/ai";
 import { checkDistrictCoverage, validateCitizenRequest, isMeaningfulRequest } from "../lib/validation";
+import { calculatePriorityScore, computePlanningSignals } from "../lib/priority";
+import { SEED_DISTRICT_CONTEXT } from "../lib/demo-data";
 
 // Auto-load .env.local if present
 try {
@@ -47,7 +49,7 @@ try {
 async function runAiProviderTests() {
   console.log("==================================================");
   console.log("  JanSanket AI Provider & Fallback Test Suite");
-  console.log("  Provider: OpenRouter (openai/gpt-4o-mini) + Fallback");
+  console.log("  Provider: Google Gemini (gemini-3.5-flash-lite) + Fallback");
   console.log("==================================================\n");
 
   let passed = 0;
@@ -262,7 +264,7 @@ async function runAiProviderTests() {
     "Village primary health center has no doctor in Dharmapuri.",
     "Tamil Nadu",
     "Dharmapuri",
-    "AI analysis is temporarily unavailable (OpenRouter rate limit reached). You can continue using the manual fallback."
+    "AI analysis is temporarily unavailable (Gemini quota limit reached). You can continue using the manual fallback."
   );
   assert("429 Fallback has source 'manual_fallback'", fallback429.source === "manual_fallback");
   assert("429 Fallback has confidence null (no fake confidence)", fallback429.confidence === null);
@@ -283,8 +285,8 @@ async function runAiProviderTests() {
     (enRes.source as string) !== "ai" && (enRes.source === "text" || enRes.source === "manual_fallback" || enRes.source === "voice")
   );
   assert(
-    "AI extraction returns provider metadata 'openrouter' or 'manual_fallback'",
-    enRes.provider === "openrouter" || enRes.provider === "manual_fallback",
+    "AI extraction returns provider metadata 'gemini' or 'manual_fallback'",
+    enRes.provider === "gemini" || enRes.provider === "manual_fallback",
     `provider: "${enRes.provider}"`
   );
 
@@ -332,7 +334,7 @@ async function runAiProviderTests() {
   );
 
   const invalidProviderSourceSubmit = validateCitizenRequest({
-    source: "openrouter",
+    source: "gemini",
     raw_text: "Road needs repair in Ramanagara",
     language_code: "en",
     state: "Karnataka",
@@ -343,9 +345,59 @@ async function runAiProviderTests() {
     ai_confidence: 0.95
   });
   assert(
-    "Invalid source 'openrouter' is strictly rejected with schema error",
+    "Invalid source 'gemini' is strictly rejected with schema error",
     invalidProviderSourceSubmit.isValid === false &&
-    invalidProviderSourceSubmit.errors.some((e) => e.includes('Invalid source "openrouter"'))
+    invalidProviderSourceSubmit.errors.some((e) => e.includes('Invalid source "gemini"'))
+  );
+
+  // 13. Outside-Pilot Request Has No Fabricated Score
+  console.log("\n--- 13. Outside-Pilot Request Has No Fabricated Score ---");
+  const outsideRequests = [
+    {
+      id: "test-outside-1",
+      raw_text: "Road repair needed in North Goa",
+      language_code: "en",
+      state: "Goa",
+      district: "North Goa",
+      category: "roads" as const,
+      need_summary: "Road repair needed in North Goa",
+      severity: "medium" as const,
+      source: "text" as const,
+      ai_confidence: 0.9,
+      created_at: new Date().toISOString()
+    }
+  ];
+  const outsideSignals = computePlanningSignals(outsideRequests, SEED_DISTRICT_CONTEXT);
+  assert(
+    "Outside-pilot request is not assigned a fabricated hotspot score",
+    outsideSignals.hotspots.length === 0,
+    `hotspots count: ${outsideSignals.hotspots.length}`
+  );
+  assert(
+    "Outside-pilot district does not appear in hotspot ranking",
+    outsideSignals.hotspots.some((h) => h.district === "North Goa") === false
+  );
+
+  // 14. Deterministic Priority Formula Verification
+  console.log("\n--- 14. Deterministic Priority Formula Verification ---");
+  // Formula:
+  // requestsPer100k = (10 / 100000) * 100000 = 10
+  // demandScore = min(100, 10 * 5) = 50
+  // unaddressedGap = 60 * (1 - 50/100) = 30
+  // expectedScore = 0.40 * 50 + 0.30 * 60 + 0.15 * 70 + 0.15 * 30 = 20 + 18 + 10.5 + 4.5 = 53.0
+  const priorityTest = calculatePriorityScore({
+    requestCount: 10,
+    population: 100000,
+    infrastructureGapIndex: 60,
+    plannedCoveragePct: 50,
+    populationImpactScore: 70
+  });
+  assert(
+    "Deterministic priority formula calculates exact expected score (53.0)",
+    priorityTest.priorityScore === 53.0 &&
+    priorityTest.demandScore === 50.0 &&
+    priorityTest.unaddressedGap === 30.0,
+    `calculated score: ${priorityTest.priorityScore}, demand: ${priorityTest.demandScore}`
   );
 
   console.log("\n==================================================");

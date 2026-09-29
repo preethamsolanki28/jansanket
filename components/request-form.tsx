@@ -631,27 +631,23 @@ export function RequestForm() {
                 <span className={`text-xs font-semibold uppercase tracking-wider ${
                   !extraction.isFallback ? "text-primary" : "text-amber-800"
                 }`}>
-                  {!extraction.isFallback ? "AI Extraction Preview" : "Manual Fallback Review (AI Unavailable)"}
+                  {!extraction.isFallback ? "What We Understood" : "Manual Review (AI Unavailable)"}
                 </span>
-                <Badge
-                  variant="outline"
-                  className={
-                    !extraction.isFallback
-                      ? "bg-blue-50 text-blue-700 border-blue-200 text-xs"
-                      : "bg-amber-100 text-amber-800 border-amber-300 text-xs font-medium"
-                  }
-                >
-                  {!extraction.isFallback
-                    ? (extraction.modelUsed ? `AI: ${extraction.modelUsed} (OpenRouter)` : "AI: GPT-4o-mini via OpenRouter")
-                    : "Manual Fallback Mode"}
-                </Badge>
+                {extraction.isFallback && (
+                  <Badge
+                    variant="outline"
+                    className="bg-amber-100 text-amber-800 border-amber-300 text-xs font-medium"
+                  >
+                    Manual Mode
+                  </Badge>
+                )}
               </div>
 
               <div className="flex items-center gap-2">
                 <Badge variant="outline" className="text-xs uppercase bg-white">
                   Language: {extraction.language}
                 </Badge>
-                {/* AI Confidence is shown ONLY for genuine successful AI extractions */}
+                {/* Confidence is shown for successful extractions without exposing provider names */}
                 {!extraction.isFallback && extraction.confidence !== null ? (
                   <Badge
                     variant="outline"
@@ -661,11 +657,11 @@ export function RequestForm() {
                         : "bg-amber-50 text-amber-700 border-amber-300"
                     }`}
                   >
-                    AI Confidence: {Math.round(extraction.confidence * 100)}%
+                    Confidence: {Math.round(extraction.confidence * 100)}%
                   </Badge>
                 ) : (
                   <Badge variant="outline" className="text-xs bg-slate-100 text-slate-600 border-slate-300">
-                    AI Confidence: Not Available
+                    Confidence: Not Available
                   </Badge>
                 )}
               </div>

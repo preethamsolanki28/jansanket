@@ -8,14 +8,14 @@ sequenceDiagram
     actor Presenter
     participant UI as Browser (/dashboard, /submit)
     participant API as Next.js API Routes
-    participant AI as OpenRouter GPT-4o-mini
+    participant AI as Google Gemini (gemini-3.5-flash-lite)
     participant DB as Postgres / Local Store
     
     Presenter->>UI: 1. Open /dashboard (Show 52 requests, Ramanagara Roads #1 at 79.7)
     Presenter->>UI: 2. Navigate to /submit & click 1-Click Kannada Preset
     Presenter->>UI: 3. Click "Analyze Request"
     UI->>API: POST /api/requests (action: "analyze")
-    API->>AI: Structured extraction (openai/gpt-4o-mini)
+    API->>AI: Structured extraction (gemini-3.5-flash-lite)
     AI-->>API: {category: "roads", district: "Ramanagara", severity: "high", ...}
     API-->>UI: Preview card with Confidence & Location Verification
     Presenter->>UI: 4. Click "Confirm & Submit Request"

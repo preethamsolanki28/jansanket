@@ -8,7 +8,7 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
     const { action = "analyze", rawText, stateHint, districtHint, requestData, source } = body;
 
-    // 1. Analyze Action: Normalize unstructured citizen request via AI layer (OpenRouter GPT-4o-mini)
+    // 1. Analyze Action: Normalize unstructured citizen request via Google Gemini (gemini-3.5-flash-lite)
     if (action === "analyze") {
       const meaning = isMeaningfulRequest(rawText);
       if (!meaning.isValid) {

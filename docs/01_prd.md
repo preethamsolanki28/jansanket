@@ -10,7 +10,7 @@
 
 ### MUST-1 — Multilingual citizen intake (India-Wide, Text-first with 1-click multilingual presets)
 
-A citizen can submit a development request from **any Indian State or Union Territory (28 States + 8 UTs)** as text or use 1-click multilingual test presets. OpenRouter (`openai/gpt-4o-mini`) converts the input into a structured request containing:
+A citizen can submit a development request from **any Indian State or Union Territory (28 States + 8 UTs)** as text or use 1-click multilingual test presets. Google Gemini (`gemini-3.5-flash-lite`) converts the input into a structured request containing:
 
 - normalized raw text
 - detected language code (`en`, `hi`, `kn`, `ta`, etc.)
@@ -60,7 +60,7 @@ The dashboard is decision support. It does not automatically allocate money, app
 flowchart TD
     subgraph Implemented ["Implemented in MVP"]
         F1[Multilingual Text Intake with 1-Click Presets]
-        F2[Server-Side OpenRouter GPT-4o-mini Structured Extraction]
+        F2[Server-Side Google Gemini gemini-3.5-flash-lite Structured Extraction]
         F3[Intelligent Fallback Engine for 429/503 Outages]
         F4[Static Deterministic Geographic Validation lib/india-locations.ts]
         F5[India-wide State & District Selectors - All 28 States & 8 UTs]
@@ -110,7 +110,7 @@ flowchart TD
 1. Citizen opens **Submit Request** (`/submit`).
 2. Citizen enters text or clicks a prepared multilingual test preset (English, Hindi, Kannada, Tamil).
 3. Citizen clicks **Analyze Request**.
-4. Next.js server route calls OpenRouter (`openai/gpt-4o-mini`); server keys never reach the browser.
+4. Next.js server route calls Google Gemini (`gemini-3.5-flash-lite`); server keys never reach the browser.
 5. AI extracts structured fields (or fallback heuristic if provider is unavailable).
 6. Citizen reviews extracted fields, adjusts State/District dropdowns if desired (covering all 28 States and 8 UTs).
 7. System deterministically validates that District belongs to State. If district is missing, citizen is prompted to provide it (never defaulted to Ramanagara).
@@ -125,7 +125,7 @@ flowchart TD
 
 - Citizens can mention a district/state or select from India-wide state and district dropdowns.
 - District is an acceptable MVP geographic unit.
-- OpenRouter GPT-4o-mini reliably returns structured fields when constrained with a strict schema.
+- Google Gemini (gemini-3.5-flash-lite) reliably returns structured fields when constrained with a strict schema.
 - 52 synthetic requests across 8 pilot districts provide immediate, visually compelling planning aggregation.
 - Requests outside the pilot districts are stored faithfully without fabricated scores.
 - Planned-investment coverage is represented as a simulated proxy (0–100%), not a live government ledger.

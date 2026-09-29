@@ -11,7 +11,7 @@ JanSanket is an AI-powered Digital Public Good prototype that converts multiling
 - shadcn/ui
 - Tailwind CSS
 - Supabase: Postgres (PostgREST HTTP queries)
-- AI Provider: OpenRouter (`openai/gpt-4o-mini`) via server-side chat completions
+- AI Provider: Google Gemini (`gemini-3.5-flash-lite`) via server-side REST API
 - Vercel
 - Python/FastAPI on Render only if a proven blocker makes it necessary; default is no Python backend
 

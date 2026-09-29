@@ -1,7 +1,7 @@
 /**
- * Provider-neutral AI extraction layer for JanSanket
- * Implements OpenRouter chat completions with openai/gpt-4o-mini
- * Strictly runs server-side only. OPENROUTER_API_KEY is never exposed to the client.
+ * Google Gemini AI extraction layer for JanSanket
+ * Implements Google Gemini (preferred model: gemini-3.5-flash-lite) for multilingual citizen request extraction.
+ * Strictly runs server-side only. GEMINI_API_KEY is never exposed to the client.
  */
 
 import {
@@ -19,7 +19,7 @@ export interface CitizenRequestExtractionResult {
   isValidRequest: boolean;
   rejectionReason?: string;
   source: RequestSource; // Citizen input channel: "text" | "voice" | "manual_fallback"
-  provider: "openrouter" | "gemini" | "manual_fallback";
+  provider: "gemini" | "manual_fallback";
   modelUsed?: string;
   language: string;
   originalText: string;
@@ -28,7 +28,7 @@ export interface CitizenRequestExtractionResult {
   category: InfrastructureCategory;
   need_summary: string;
   severity: Severity;
-  confidence: number | null; // null for manual_fallback; 0.0-1.0 for AI
+  confidence: number | null; // null for manual_fallback; 0.0-1.0 for Gemini
   isFallback: boolean;
   fallbackReason?: string;
   isSupportedDistrict: boolean;
@@ -51,64 +51,63 @@ Rules:
 8. Identify language code (e.g. "en", "hi", "kn", "ta").
 9. Strict Boundary: Never decide public spending, budget allocation, or project approval.`;
 
-const OPENROUTER_JSON_SCHEMA = {
-  type: "object",
+const GEMINI_RESPONSE_SCHEMA = {
+  type: "OBJECT",
   properties: {
     is_valid_request: {
-      type: "boolean",
+      type: "BOOLEAN",
       description: "False if the input is random characters, keyboard gibberish, test spam, greetings, casual chit-chat, personal remarks, or contains no civic issue. True if it describes a real public infrastructure or public service problem."
     },
     rejection_reason: {
-      type: ["string", "null"],
+      type: "STRING",
+      nullable: true,
       description: "If is_valid_request is false, explain why (e.g. 'Please describe a real infrastructure or public-service problem.'). If valid, null."
     },
     language: {
-      type: "string",
+      type: "STRING",
       description: "ISO language code, e.g. en, hi, kn, ta"
     },
     state: {
-      type: ["string", "null"],
-      description: "Normalized Indian state name, or null if unmentioned or unknown"
+      type: "STRING",
+      nullable: true,
+      description: "Normalized Indian state or union territory name, or null if unmentioned or unknown"
     },
     district: {
-      type: ["string", "null"],
+      type: "STRING",
+      nullable: true,
       description: "Normalized Indian district name, or null if unmentioned or unknown"
     },
     category: {
-      type: "string",
+      type: "STRING",
       enum: ["roads", "water", "sanitation", "healthcare", "education", "power", "transport", "other"],
       description: "Standard infrastructure category"
     },
     need_summary: {
-      type: "string",
+      type: "STRING",
       description: "Concise one-sentence summary of the development need strictly translated into English. Never return regional non-English script."
     },
     severity: {
-      type: "string",
+      type: "STRING",
       enum: ["low", "medium", "high"],
       description: "Severity level of the problem"
     },
     confidence: {
-      type: "number",
+      type: "NUMBER",
       description: "Model confidence in extraction from 0.0 to 1.0 (0.0 if invalid)"
     }
   },
   required: [
     "is_valid_request",
-    "rejection_reason",
     "language",
-    "state",
-    "district",
     "category",
     "need_summary",
     "severity",
     "confidence"
-  ],
-  additionalProperties: false
+  ]
 };
 
 /**
- * Deterministic fallback when AI API is unavailable (e.g. HTTP 429 quota exhaustion or network outage)
+ * Deterministic fallback when Gemini API is unavailable (e.g. HTTP 429 quota exhaustion or network outage)
  * Implements strict boundaries:
  * - Detects invalid/gibberish input and marks invalid
  * - Does NOT return fake confidence
@@ -233,6 +232,7 @@ export function getPreparedFallback(
     lower.includes("electric") ||
     lower.includes("transformer") ||
     lower.includes("light") ||
+    lower.includes("outage") ||
     lower.includes("बिजली") ||
     lower.includes("ವಿದ್ಯುತ್") ||
     lower.includes("மின்சாரம்")
@@ -253,7 +253,6 @@ export function getPreparedFallback(
   if (language === "en") {
     need_summary = rawText.length > 120 ? `${rawText.slice(0, 117)}...` : rawText;
   } else {
-    // Meaningful English synthesis based on detected category
     switch (category) {
       case "roads":
         need_summary = "Citizen reported village road access, damage, or connectivity issues.";
@@ -295,8 +294,8 @@ export function getPreparedFallback(
   // Also check if canonical district is mentioned directly in rawText
   const districtInText = findCanonicalDistrict(rawText);
   if (districtInText) {
-    candidateDistrict = districtInText.district;
-    candidateState = districtInText.state;
+    candidateDistrict = candidateDistrict || districtInText.district;
+    candidateState = candidateState || districtInText.state;
   }
 
   const coverage = candidateDistrict ? checkDistrictCoverage(candidateDistrict, candidateState) : null;
@@ -319,16 +318,16 @@ export function getPreparedFallback(
     severity: "medium",
     confidence: null, // Strictly null for fallback to avoid fake AI confidence
     isFallback: true,
-    fallbackReason: reason || "AI analysis is temporarily unavailable. You can continue using the manual fallback.",
+    fallbackReason: reason || "AI analysis is temporarily unavailable (Gemini quota limit reached). You can continue using the manual fallback.",
     isSupportedDistrict,
     unsupportedDistrictName
   };
 }
 
 /**
- * Normalizes citizen request via OpenRouter OpenAI-compatible chat completions API
+ * Normalizes citizen text request using Google Gemini (preferred model: gemini-3.5-flash-lite)
  */
-export async function normalizeRequestWithOpenRouter(
+export async function normalizeRequestWithGemini(
   rawText: string,
   stateHint?: string,
   districtHint?: string,
@@ -341,8 +340,8 @@ export async function normalizeRequestWithOpenRouter(
       isValidRequest: false,
       rejectionReason: preCheck.reason || "Please describe a real infrastructure or public-service problem.",
       source: inputChannel,
-      provider: "openrouter",
-      modelUsed: process.env.AI_MODEL || "openai/gpt-4o-mini",
+      provider: "gemini",
+      modelUsed: process.env.GEMINI_MODEL || "gemini-3.5-flash-lite",
       language: "en",
       originalText: rawText,
       state: null,
@@ -357,103 +356,87 @@ export async function normalizeRequestWithOpenRouter(
     };
   }
 
-  const apiKey = process.env.OPENROUTER_API_KEY;
-  const model = process.env.AI_MODEL || "openai/gpt-4o-mini";
+  const apiKey = process.env.GEMINI_API_KEY;
+  const preferredModel = process.env.GEMINI_MODEL || "gemini-3.5-flash-lite";
 
   if (!apiKey) {
     return getPreparedFallback(
       rawText,
       stateHint,
       districtHint,
-      "AI analysis is temporarily unavailable (OPENROUTER_API_KEY not configured). You can continue using the manual fallback."
+      "AI analysis is temporarily unavailable (GEMINI_API_KEY not configured). You can continue using the manual fallback."
     );
   }
 
   const promptText = `Citizen Request: "${rawText}"\n${stateHint ? `State Hint: ${stateHint}\n` : ""}${districtHint ? `District Hint: ${districtHint}\n` : ""}`;
 
   const payload = {
-    model,
-    messages: [
-      { role: "system", content: SYSTEM_INSTRUCTION },
-      { role: "user", content: promptText }
-    ],
-    response_format: {
-      type: "json_schema",
-      json_schema: {
-        name: "citizen_request_extraction",
-        strict: true,
-        schema: OPENROUTER_JSON_SCHEMA
+    contents: [
+      {
+        parts: [{ text: promptText }]
       }
+    ],
+    systemInstruction: {
+      parts: [{ text: SYSTEM_INSTRUCTION }]
     },
-    temperature: 0.1
+    generationConfig: {
+      temperature: 0.1,
+      responseMimeType: "application/json",
+      responseSchema: GEMINI_RESPONSE_SCHEMA
+    }
   };
 
-  const endpoint = "https://openrouter.ai/api/v1/chat/completions";
-
-  try {
-    let res = await fetch(endpoint, {
+  const callGeminiModel = async (modelName: string) => {
+    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
+    return fetch(endpoint, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-        "HTTP-Referer": process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000",
-        "X-Title": "JanSanket Planning Intelligence"
-      },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
       signal: AbortSignal.timeout(12000)
     });
+  };
 
-    // If json_schema mode is rejected by a specific router variant, retry with json_object
-    if (!res.ok && res.status === 400) {
-      const errBody = await res.text();
-      if (errBody.includes("json_schema") || errBody.includes("response_format")) {
-        console.warn("Retrying with json_object response_format...");
-        res = await fetch(endpoint, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${apiKey}`,
-            "HTTP-Referer": process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000",
-            "X-Title": "JanSanket Planning Intelligence"
-          },
-          body: JSON.stringify({
-            ...payload,
-            response_format: { type: "json_object" }
-          }),
-          signal: AbortSignal.timeout(12000)
-        });
+  try {
+    let res = await callGeminiModel(preferredModel);
+    let activeModel = preferredModel;
+
+    // If preferred model returns 404 (e.g. provisioned under a different Gemini variant like gemini-2.5-flash-lite or gemini-1.5-flash)
+    if (!res.ok && res.status === 404 && preferredModel === "gemini-3.5-flash-lite") {
+      console.warn(`Gemini model ${preferredModel} returned 404, attempting fallback to gemini-2.5-flash-lite...`);
+      const fallbackAttempt = await callGeminiModel("gemini-2.5-flash-lite");
+      if (fallbackAttempt.ok) {
+        res = fallbackAttempt;
+        activeModel = "gemini-2.5-flash-lite";
       } else {
-        console.warn(`OpenRouter API error ${res.status}: ${errBody}`);
-        return getPreparedFallback(
-          rawText,
-          stateHint,
-          districtHint,
-          `AI analysis is temporarily unavailable (HTTP ${res.status}). You can continue using the manual fallback.`
-        );
+        const flashAttempt = await callGeminiModel("gemini-1.5-flash");
+        if (flashAttempt.ok) {
+          res = flashAttempt;
+          activeModel = "gemini-1.5-flash";
+        }
       }
     }
 
     if (!res.ok) {
       const errText = await res.text();
-      console.warn(`OpenRouter API returned ${res.status}: ${errText}`);
-      const isQuota = res.status === 429 || res.status === 402;
+      console.warn(`Gemini API returned ${res.status}: ${errText}`);
+      const isQuota = res.status === 429;
       return getPreparedFallback(
         rawText,
         stateHint,
         districtHint,
         isQuota
-          ? "AI analysis is temporarily unavailable (OpenRouter rate limit or credit limit reached). You can continue using the manual fallback."
+          ? "AI analysis is temporarily unavailable (Gemini quota limit reached). You can continue using the manual fallback."
           : `AI analysis is temporarily unavailable (HTTP ${res.status}). You can continue using the manual fallback.`
       );
     }
 
     const data = await res.json();
-    const content = data.choices?.[0]?.message?.content;
-    if (!content || typeof content !== "string") {
-      throw new Error("Empty completion returned by OpenRouter API");
+    const candidateText = data.candidates?.[0]?.content?.parts?.[0]?.text;
+    if (!candidateText || typeof candidateText !== "string") {
+      throw new Error("Empty candidate returned by Gemini API");
     }
 
-    let cleanJson = content.trim();
+    let cleanJson = candidateText.trim();
     if (cleanJson.startsWith("```json")) {
       cleanJson = cleanJson.slice(7);
     } else if (cleanJson.startsWith("```")) {
@@ -466,14 +449,14 @@ export async function normalizeRequestWithOpenRouter(
 
     const parsed = JSON.parse(cleanJson);
 
-    // 1. Model determined the input was invalid/gibberish
+    // 1. Model determined input was invalid/non-civic
     if (parsed.is_valid_request === false) {
       return {
         isValidRequest: false,
         rejectionReason: parsed.rejection_reason || "Please describe a real infrastructure or public-service problem.",
         source: inputChannel,
-        provider: "openrouter",
-        modelUsed: data.model || model,
+        provider: "gemini",
+        modelUsed: activeModel,
         language: parsed.language || "en",
         originalText: rawText,
         state: null,
@@ -494,15 +477,24 @@ export async function normalizeRequestWithOpenRouter(
     // 3. Validate severity
     const severity = isValidSeverity(parsed.severity) ? parsed.severity : "medium";
 
-    // 4. District validation & coverage check across India
-    const rawDistrict = parsed.district || districtHint || null;
-    const rawState = parsed.state || stateHint || null;
-    const coverage = checkDistrictCoverage(rawDistrict, rawState);
+    // 4. District validation & coverage check
+    let rawDistrict = typeof parsed.district === "string" && parsed.district.trim() ? parsed.district.trim() : (districtHint?.trim() || null);
+    let rawState = typeof parsed.state === "string" && parsed.state.trim() ? parsed.state.trim() : (stateHint?.trim() || null);
 
-    const isSupportedDistrict = Boolean(coverage.isSupported);
-    const canonicalDistrict = coverage.isGeographicallyValid ? coverage.canonical?.district || null : null;
-    const canonicalState = coverage.isGeographicallyValid ? coverage.canonical?.state || null : (rawState || null);
-    const unsupportedDistrictName = rawDistrict && !coverage.isSupported ? (coverage.canonical?.district || rawDistrict) : null;
+    // Check if district or alias exists in raw text if not yet resolved
+    if (!rawDistrict) {
+      const textLoc = findCanonicalDistrict(rawText);
+      if (textLoc) {
+        rawDistrict = textLoc.district;
+        rawState = rawState || textLoc.state;
+      }
+    }
+
+    const coverage = rawDistrict ? checkDistrictCoverage(rawDistrict, rawState) : null;
+    const isSupportedDistrict = Boolean(coverage?.isSupported);
+    const canonicalDistrict = coverage?.isGeographicallyValid ? coverage.canonical?.district || null : null;
+    const canonicalState = coverage?.isGeographicallyValid ? coverage.canonical?.state || null : (rawState || null);
+    const unsupportedDistrictName = rawDistrict && !coverage?.isSupported ? (coverage?.canonical?.district || rawDistrict) : null;
 
     // 5. Validated need summary (strictly in English)
     let needSummary = typeof parsed.need_summary === "string" ? parsed.need_summary.trim() : "";
@@ -543,8 +535,8 @@ export async function normalizeRequestWithOpenRouter(
     return {
       isValidRequest: true,
       source: inputChannel,
-      provider: "openrouter",
-      modelUsed: data.model || model,
+      provider: "gemini",
+      modelUsed: activeModel,
       language: parsed.language || "en",
       originalText: rawText,
       state: canonicalState,
@@ -559,7 +551,7 @@ export async function normalizeRequestWithOpenRouter(
     };
   } catch (error: unknown) {
     const errorMsg = error instanceof Error ? error.message : "Unknown error";
-    console.warn("OpenRouter normalization failure, routing to fallback:", errorMsg);
+    console.warn("Gemini normalization failure, routing to fallback:", errorMsg);
     return getPreparedFallback(
       rawText,
       stateHint,
@@ -571,7 +563,7 @@ export async function normalizeRequestWithOpenRouter(
 
 /**
  * Provider-neutral AI extraction entry point
- * Primary provider: OpenRouter (openai/gpt-4o-mini)
+ * Primary provider: Google Gemini (gemini-3.5-flash-lite)
  */
 export async function normalizeCitizenRequest(
   rawText: string,
@@ -579,8 +571,5 @@ export async function normalizeCitizenRequest(
   districtHint?: string,
   inputChannel: RequestSource = "text"
 ): Promise<CitizenRequestExtractionResult> {
-  return normalizeRequestWithOpenRouter(rawText, stateHint, districtHint, inputChannel);
+  return normalizeRequestWithGemini(rawText, stateHint, districtHint, inputChannel);
 }
-
-// Backward-compatible alias for existing callers
-export const normalizeRequestWithGemini = normalizeCitizenRequest;
