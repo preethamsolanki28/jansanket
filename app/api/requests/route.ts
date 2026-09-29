@@ -67,13 +67,25 @@ export async function POST(req: NextRequest) {
       }
 
       // Persist validated request
-      const { request: savedRecord, provider } = await persistCitizenRequest(validation.validated);
+      try {
+        const { request: savedRecord, provider } = await persistCitizenRequest(validation.validated);
 
-      return NextResponse.json({
-        success: true,
-        request: savedRecord,
-        provider
-      });
+        return NextResponse.json({
+          success: true,
+          request: savedRecord,
+          provider
+        });
+      } catch (dbErr: unknown) {
+        const dbMsg = dbErr instanceof Error ? dbErr.message : "Database write error";
+        console.error("Durable persistence failed:", dbMsg);
+        return NextResponse.json(
+          {
+            error: "Durable database persistence failed. Your request could not be saved to Supabase.",
+            details: [dbMsg]
+          },
+          { status: 503 }
+        );
+      }
     }
 
     return NextResponse.json(

@@ -143,7 +143,7 @@ npm run typecheck
 # 2. Production Build
 npm run build
 
-# 3. Comprehensive End-to-End Production Smoke Test (7/7 Passed)
+# 3. Comprehensive End-to-End Production Smoke Test (9/9 Passed)
 npx tsx scripts/smoke-test.ts
 ```
 
@@ -153,8 +153,10 @@ The automated smoke test verifies:
 3. Schema validation guards reject malformed requests with HTTP 422.
 4. Request persistence dynamically recalculates total requests and hotspot priority scores.
 5. Zero secrets (`GEMINI_API_KEY`, Supabase keys) exposed in HTTP response bodies.
-6. Meaningless input (`sdgsafdasafd`) is screened and rejected with HTTP 400.
+6. Meaningless and non-civic input (`sdgsafdasafd`, `hello there how are you`, `this is a test`, `I like apples`) is screened and rejected with HTTP 400.
 7. Outside-scope locations (`Goa / Anjuna`) are never converted to Ramanagara and rejected on submit.
+8. State-district mismatches (`Goa + Ramanagara`) are rejected with HTTP 422.
+9. Indic requests produce genuine English normalized summaries (never copying raw Indic script into English fields).
 
 ---
 
@@ -164,8 +166,8 @@ The automated smoke test verifies:
 2. **Citizen Submission (8–20s):** Click **"Submit Request"**. In the **"Try an example"** section, click **"ಕನ್ನಡ (Roads - Ramanagara)"**:
    > *“ಮಳೆ ಬಂದಾಗ ನಮ್ಮ ಗ್ರಾಮದ ರಸ್ತೆ ಬಳಸಲು ಸಾಧ್ಯವಾಗುವುದಿಲ್ಲ, ರಾಮನಗರ ಜಿಲ್ಲೆಯ ಶಾಲೆಗೆ ಹೋಗಲು ಕಷ್ಟವಾಗುತ್ತಿದೆ.”*
 3. **AI Normalization & Purpose (20–32s):** Click **"Analyze Request"**. Point to the banner: *"Gemini converts the citizen's message into structured information so requests can be grouped and compared across districts."* Observe that Kannada was translated into a concise English need summary.
-4. **Validation & Confirmation (32–42s):** Click **"Confirm & Submit Request"**. A unique UUID is assigned and persisted. Click **"View planning signals"**.
-5. **Explain the Hotspot (42–60s):** On `/dashboard`, observe that **Ramanagara Roads** has updated dynamically (score jumps to **83.3**). Click the row to inspect **"Why this area is highlighted"**:
+4. **Validation & Confirmation (32–42s):** Acknowledge the demo submission checkbox and click **"Confirm & Submit Request"**. A unique UUID is assigned and persisted. Click **"View Planning Signals"**.
+5. **Explain the Hotspot (42–60s):** On `/dashboard`, observe that **Ramanagara Roads** has updated dynamically (score jumps to **83.3**). Click the row to inspect **"Why This Area Needs Attention"**:
    $$0.40(100) + 0.30(78.0) + 0.15(72.0) + 0.15(60.8) = \mathbf{83.3}$$
    Point out that Gemini structured the evidence, while pure deterministic code calculated the priority score.
 

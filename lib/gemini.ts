@@ -34,7 +34,7 @@ export interface GeminiExtractionResult {
 const SYSTEM_INSTRUCTION = `You are an AI assistant for JanSanket, an Indian Digital Public Good infrastructure planning intelligence platform.
 Your task is to analyze unstructured citizen development requests and extract structured planning evidence.
 Rules:
-1. Assess Validity: Determine if the request describes a real infrastructure, public service, or community development problem. If the input is random characters, keyboard gibberish, spam (e.g. "sdgsafdasafd", "asdfghjkl"), greeting-only, or contains no civic issue, set is_valid_request to false, confidence to 0.0, and provide a clear rejection_reason ("Please describe a real infrastructure or public-service problem.").
+1. Assess Validity: Determine if the request describes a real infrastructure, public service, or community development problem. If the input is random characters, keyboard gibberish, test spam, greetings, casual chit-chat, personal remarks (e.g. "sdgsafdasafd", "hello there how are you", "this is a test", "I like apples"), or contains no civic issue, set is_valid_request to false, confidence to 0.0, and provide a clear rejection_reason ("Please describe a real infrastructure or public-service problem.").
 2. Extract rather than invent. Do NOT assign a default district if none was mentioned.
 3. Normalize Indian state and district names if mentioned (e.g. "रामनगर" or "Ramanagara" -> "Ramanagara", "தருமபுரி" -> "Dharmapuri"). If district or state is not mentioned or uncertain, return null.
 4. Categorize into exactly one of: "roads", "water", "sanitation", "healthcare", "education", "power", "transport", "other".
@@ -446,10 +446,36 @@ export async function normalizeRequestWithGemini(
     const canonicalState = coverage.isSupported ? coverage.canonical?.state || null : rawState;
     const unsupportedDistrictName = rawDistrict && !coverage.isSupported ? rawDistrict : null;
 
-    // 5. Validated need summary
+    // 5. Validated need summary (strictly in English)
     let needSummary = typeof parsed.need_summary === "string" ? parsed.need_summary.trim() : "";
-    if (!needSummary) {
-      needSummary = rawText;
+    const hasIndicChars = /[\u0900-\u0D7F]/.test(needSummary);
+    if (!needSummary || hasIndicChars) {
+      // Synthesize clean English summary from detected category
+      switch (category) {
+        case "roads":
+          needSummary = "Citizen reported village road access, damage, or connectivity issues.";
+          break;
+        case "water":
+          needSummary = "Citizen reported drinking water supply shortage or pipeline issues.";
+          break;
+        case "sanitation":
+          needSummary = "Citizen reported drainage overflow, sewage blockage, or waste disposal deficit.";
+          break;
+        case "healthcare":
+          needSummary = "Citizen reported lack of primary healthcare staff, clinic access, or medicine.";
+          break;
+        case "education":
+          needSummary = "Citizen reported school building infrastructure or classroom facility issues.";
+          break;
+        case "power":
+          needSummary = "Citizen reported electricity outages or transformer failure.";
+          break;
+        case "transport":
+          needSummary = "Citizen reported public transport or bus connectivity issues.";
+          break;
+        default:
+          needSummary = "Citizen reported a local public infrastructure need in regional language (English translation requires manual review).";
+      }
     }
 
     // 6. Confidence

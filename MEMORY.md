@@ -28,24 +28,25 @@ flowchart LR
 - **State 1: VALID AI RESULT**
   - Trigger: Successful Gemini 3.8 Flash analysis.
   - UI: Displays *Analyzed by Gemini 3.8 Flash* badge, genuine AI confidence (e.g. 94%), original citizen text, and an English normalized summary.
-  - Explanatory banner explains Gemini's role in structuring citizen language for district aggregation.
+  - Explanatory banner explains Gemini's role in structuring citizen language for district aggregation (and clarifies that Gemini does NOT calculate priority scores).
 - **State 2: VALID MANUAL FALLBACK**
   - Trigger: Gemini HTTP 429 quota exhaustion or backend timeout.
-  - UI: Displays *Manual Fallback Mode* badge and *AI Confidence: Not Available* (**zero fake confidence**).
+  - UI: Displays *Manual Fallback Review (AI Unavailable)* badge and *AI Confidence: Not Available* (**zero fake confidence**).
   - Synthesizes a genuine English category summary (never copies raw Indic text into English fields).
   - Never defaults to Ramanagara; user must explicitly verify and select a supported district.
+  - Requires explicit user checkbox confirmation before submission.
 - **State 3: INVALID REQUEST**
-  - Trigger: Meaningless text, keyboard mash (`sdgsafdasafd`), or single-word junk.
+  - Trigger: Meaningless text, keyboard mash (`sdgsafdasafd`), greetings, test spam, casual statements (`hello there how are you`, `this is a test`, `I like apples`).
   - Screened by `isMeaningfulRequest()` in `lib/validation.ts`.
   - Blocked with HTTP 400: *"Please describe a real infrastructure or public-service problem."*
   - Zero AI confidence, zero district default, zero database write.
 
 ### 2. Demo Scope & Boundary Protection
 - **Pilot Coverage:** Strictly 8 districts across 4 states (Karnataka: Ramanagara, Tumakuru; UP: Bahraich, Varanasi; Rajasthan: Barmer, Dausa; Tamil Nadu: Dharmapuri, Madurai).
-- **Outside-Scope Districts:** If a user enters an outside location (e.g. `State = Goa, District = Anjuna`):
-  - Never silently converted to Ramanagara.
-  - Flagged as outside demo coverage; district select left unselected.
-  - Submission rejected with HTTP 422 until a supported pilot district is selected.
+- **State-District Pair Matching:** State and district are strictly validated as a matching pair.
+  - Example: `State = Goa, District = Ramanagara` is rejected (Ramanagara belongs to Karnataka, not Goa).
+  - Example: `State = Goa, District = Anjuna` is rejected (outside pilot coverage).
+  - Supported pilot district dropdown automatically derives and locks the valid state.
 
 ### 3. Safe Multilingual Demo Examples
 - Renamed to *"Try an example (Demo content)"* with 4 diverse cases:
@@ -53,7 +54,7 @@ flowchart LR
   2. `हिन्दी (Water - Bahraich)`: Drinking water shortage and broken handpumps.
   3. `தமிழ் (Healthcare - Dharmapuri)`: Primary health center doctor shortage.
   4. `English (Sanitation - Varanasi)`: Open drainage overflow and health risks.
-- Clearly marked with a demo badge; requires clicking *Analyze Request* before submission (no accidental submission traps).
+- Clearly marked with a demo badge; requires clicking *Analyze Request* and checking an explicit demo submission acknowledgment checkbox before submission (prevents accidental submission traps).
 
 ### 4. Plain-Language Planner Dashboard (`/dashboard`)
 - Replaced technical jargon with plain civic terms:
@@ -65,9 +66,14 @@ flowchart LR
   - Population Impact (15%) $\rightarrow$ **People Affected (15%)**
   - Planned Coverage $\rightarrow$ **Current Coverage**
   - Unaddressed Gap (15%) $\rightarrow$ **Unaddressed Need (15%)**
-  - Hotspot Evidence Breakdown $\rightarrow$ **Why this area is highlighted**
+  - Hotspot Evidence Breakdown $\rightarrow$ **Why This Area Needs Attention**
 - Mathematical integrity preserved:
   $$\text{Priority Score} = 0.40 \times \text{Demand} + 0.30 \times \text{Need} + 0.15 \times \text{People Affected} + 0.15 \times \text{Unaddressed Need}$$
+
+### 5. Database Write Security & Supabase Fallback Hardening
+- **RLS Write Security:** `citizen_requests` INSERT access is restricted strictly to `service_role` via `supabase/migrations/20260929000004_fix_write_security.sql`. Browser/client anonymous direct inserts are completely blocked.
+- **Fail-Safe Persistence:** `lib/db.ts` throws an explicit error when Supabase is configured but a write fails (returning HTTP 503), preventing false success reports.
+- **Provider Status:** UI indicates whether requests were saved to *Supabase Postgres* or the *Active Demo Store*.
 
 ---
 
@@ -87,7 +93,7 @@ flowchart LR
 - **UI Components:** shadcn/ui primitives (`Button`, `Card`, `Badge`, `Textarea`, `Alert`, `Table`)
 - **AI Model:** `gemini-3.8-flash` via server-side Google Generative Language REST API
 - **Database:** Supabase Postgres (with PostgREST HTTP queries and active demo store fallback)
-- **Testing:** Standalone verification suites (`scripts/smoke-test.ts` with 7/7 automated checks)
+- **Testing:** Standalone verification suites (`scripts/smoke-test.ts` with 9/9 automated checks)
 
 ---
 
@@ -100,7 +106,8 @@ flowchart LR
 - **D004:** Context key is strictly `state + district + category` across 8 pilot districts.
 - **D005:** Synthetic data is explicitly labeled `demo_synthetic`. Baseline values are simulated proxies based on public data formats (OGD/IIG).
 - **D006:** `DEMO_MODE=true` and unconfigured Supabase mode gracefully fall back to active memory fixtures without throwing unhandled exceptions.
-- **D007 (Post-M5):** 3-state pipeline guarantees: invalid input is rejected with HTTP 400; manual fallback shows zero fake confidence; unsupported districts are never silently altered.
+- **D007 (Post-M5):** 3-state pipeline guarantees: invalid input is rejected with HTTP 400; manual fallback shows zero fake confidence; unsupported districts and mismatched state-district pairs are never silently altered.
+- **D008 (Post-M5):** Database security: client writes must traverse server route; anon INSERT policy removed; Supabase write failure returns HTTP 503 instead of false success.
 
 ---
 

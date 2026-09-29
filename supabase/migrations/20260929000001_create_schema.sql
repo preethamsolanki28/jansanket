@@ -66,9 +66,10 @@ CREATE POLICY "Allow public read access on citizen_requests"
     ON citizen_requests FOR SELECT
     USING (true);
 
--- Allow server route inserts
-CREATE POLICY "Allow insert on citizen_requests"
+-- Allow server-side inserts strictly via service_role (blocks direct browser/client anon inserts)
+CREATE POLICY "Allow service_role insert on citizen_requests"
     ON citizen_requests FOR INSERT
+    TO service_role
     WITH CHECK (true);
 
 -- Allow public read access on district context

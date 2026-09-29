@@ -399,7 +399,7 @@ export function DashboardView() {
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-bold uppercase tracking-wider text-primary flex items-center gap-1.5">
                     <TrendingUp className="h-3.5 w-3.5" />
-                    Why this area is highlighted
+                    Why This Area Needs Attention
                   </span>
                   <Badge
                     variant="outline"

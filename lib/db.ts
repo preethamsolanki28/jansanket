@@ -121,14 +121,16 @@ export async function persistCitizenRequest(
       }
 
       const errorText = await res.text();
-      console.warn(`Supabase insert failed (${res.status}): ${errorText}. Saving to active fallback store.`);
+      console.error(`Supabase write failed (${res.status}): ${errorText}`);
+      throw new Error(`Durable persistence failed: Supabase write failed (${res.status}): ${errorText}`);
     } catch (err: unknown) {
       const errorMsg = err instanceof Error ? err.message : "Network error";
-      console.warn(`Could not connect to Supabase: ${errorMsg}. Falling back to active local store.`);
+      console.error(`Could not connect to Supabase: ${errorMsg}`);
+      throw new Error(`Durable persistence failed: Could not connect to Supabase (${errorMsg})`);
     }
   }
 
-  // Active store fallback (DEMO_MODE / unconfigured Supabase)
+  // Active demo store fallback ONLY when Supabase credentials are intentionally unconfigured
   localRequestStore.unshift(record);
   return { request: record, provider: "demo_store" };
 }

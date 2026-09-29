@@ -122,7 +122,8 @@ code-for-communities/
 │   ├── migrations/                  # Schema, RLS policies, and seed migrations
 │   │   ├── 20260929000001_create_schema.sql
 │   │   ├── 20260929000002_seed_district_context.sql
-│   │   └── 20260929000003_seed_citizen_requests.sql
+│   │   ├── 20260929000003_seed_citizen_requests.sql
+│   │   └── 20260929000004_fix_write_security.sql
 │   └── seed.sql                     # Combined seed migration
 ├── public/
 └── docs/

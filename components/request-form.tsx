@@ -20,6 +20,8 @@ import {
   ALLOWED_SEVERITIES,
   InfrastructureCategory,
   Severity,
+  checkDistrictCoverage,
+  isMeaningfulRequest,
 } from "@/lib/validation";
 import { GeminiExtractionResult } from "@/lib/gemini";
 import {
@@ -28,6 +30,7 @@ import {
   CheckCircle2,
   ArrowRight,
   ShieldAlert,
+  Info,
 } from "lucide-react";
 
 const TRY_AN_EXAMPLE_SAMPLES = [
@@ -86,6 +89,9 @@ export function RequestForm() {
   const [districtHint, setDistrictHint] = useState("");
   const [customLocationMode, setCustomLocationMode] = useState(false);
   const [activeExampleLabel, setActiveExampleLabel] = useState<string | null>(null);
+  const [isExampleLoaded, setIsExampleLoaded] = useState(false);
+  const [demoAcknowledged, setDemoAcknowledged] = useState(false);
+  const [manualReviewConfirmed, setManualReviewConfirmed] = useState(false);
 
   // Loading & error states
   const [isAnalyzing, setIsAnalyzing] = useState(false);
@@ -103,6 +109,7 @@ export function RequestForm() {
 
   // Submitted success state
   const [submittedResult, setSubmittedResult] = useState<SubmittedRequest | null>(null);
+  const [submittedProvider, setSubmittedProvider] = useState<"supabase" | "demo_store" | null>(null);
 
   const applyExample = (sample: (typeof TRY_AN_EXAMPLE_SAMPLES)[number]) => {
     setRawText(sample.text);
@@ -110,8 +117,12 @@ export function RequestForm() {
     setDistrictHint(sample.district);
     setCustomLocationMode(false);
     setActiveExampleLabel(sample.label);
+    setIsExampleLoaded(true);
+    setDemoAcknowledged(false);
+    setManualReviewConfirmed(false);
     setAnalysisError(null);
     setExtraction(null);
+    setSubmissionError(null);
   };
 
   const handleClearExample = () => {
@@ -119,14 +130,22 @@ export function RequestForm() {
     setStateHint("");
     setDistrictHint("");
     setActiveExampleLabel(null);
+    setIsExampleLoaded(false);
+    setDemoAcknowledged(false);
     setExtraction(null);
     setAnalysisError(null);
+    setSubmissionError(null);
   };
 
   const handleAnalyze = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!rawText.trim() || rawText.trim().length < 5) {
-      setAnalysisError("Please describe a real infrastructure or public-service problem (at least 5 characters).");
+    const cleanText = rawText.trim();
+
+    // 1. Client-side semantic & meaningfulness pre-screen
+    const meaning = isMeaningfulRequest(cleanText);
+    if (!meaning.isValid) {
+      setAnalysisError(meaning.reason || "Please describe a real infrastructure or public-service problem.");
+      setExtraction(null);
       return;
     }
 
@@ -141,7 +160,7 @@ export function RequestForm() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           action: "analyze",
-          rawText: rawText.trim(),
+          rawText: cleanText,
           stateHint: stateHint.trim() || undefined,
           districtHint: districtHint.trim() || undefined,
         }),
@@ -162,15 +181,22 @@ export function RequestForm() {
       setEditableCategory(ext.category || "roads");
       setEditableNeedSummary(ext.need_summary || "");
       setEditableSeverity(ext.severity || "medium");
+      setManualReviewConfirmed(false);
 
-      // Strict district handling: NEVER default to Ramanagara
-      if (ext.isSupportedDistrict && ext.district) {
-        setEditableDistrict(ext.district);
-        setEditableState(ext.state || "");
+      // Strict district handling: Validate matching State + District pair
+      if (ext.isSupportedDistrict && ext.district && ext.state) {
+        const pairCheck = checkDistrictCoverage(ext.district, ext.state);
+        if (pairCheck.isSupported && pairCheck.canonical) {
+          setEditableDistrict(pairCheck.canonical.district);
+          setEditableState(pairCheck.canonical.state);
+        } else {
+          setEditableDistrict("");
+          setEditableState("");
+        }
       } else {
-        // District is outside coverage or missing -> require explicit selection
+        // District outside coverage or missing -> require explicit selection from supported pilot list
         setEditableDistrict("");
-        setEditableState(ext.state || "");
+        setEditableState("");
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Analysis failed";
@@ -184,6 +210,25 @@ export function RequestForm() {
   const handleConfirmSubmit = async () => {
     if (!editableDistrict) {
       setSubmissionError("This district is outside the current demo coverage. Please select a supported district.");
+      return;
+    }
+
+    // Strict state + district pair verification
+    const pairCheck = checkDistrictCoverage(editableDistrict, editableState);
+    if (!pairCheck.isSupported || !pairCheck.canonical) {
+      setSubmissionError(pairCheck.message || "State and district do not match. Please select a valid pilot district.");
+      return;
+    }
+
+    // Manual fallback mode requires explicit confirmation
+    if (extraction?.isFallback && !manualReviewConfirmed) {
+      setSubmissionError("Please review the fields above and check the confirmation box before submitting.");
+      return;
+    }
+
+    // Canned demo examples require explicit acknowledgment
+    if (isExampleLoaded && !demoAcknowledged) {
+      setSubmissionError("Please confirm that this is a demonstration test submission before submitting.");
       return;
     }
 
@@ -201,12 +246,12 @@ export function RequestForm() {
           requestData: {
             raw_text: rawText,
             language_code: extraction?.language || "en",
-            state: editableState,
-            district: editableDistrict,
+            state: pairCheck.canonical.state,
+            district: pairCheck.canonical.district,
             category: editableCategory,
             need_summary: editableNeedSummary,
             severity: editableSeverity,
-            ai_confidence: extraction?.confidence ?? 0.0,
+            ai_confidence: extraction?.isFallback ? 0.0 : (extraction?.confidence ?? 0.0),
           },
         }),
       });
@@ -218,6 +263,7 @@ export function RequestForm() {
       }
 
       setSubmittedResult(data.request);
+      setSubmittedProvider(data.provider || "demo_store");
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Submission failed";
       setSubmissionError(msg);
@@ -231,8 +277,12 @@ export function RequestForm() {
     setStateHint("");
     setDistrictHint("");
     setActiveExampleLabel(null);
+    setIsExampleLoaded(false);
+    setDemoAcknowledged(false);
+    setManualReviewConfirmed(false);
     setExtraction(null);
     setSubmittedResult(null);
+    setSubmittedProvider(null);
     setAnalysisError(null);
     setSubmissionError(null);
     setCustomLocationMode(false);
@@ -243,14 +293,19 @@ export function RequestForm() {
     return (
       <Card className="bg-white border-border shadow-xs">
         <CardHeader className="pb-3 border-b border-border bg-emerald-50/50">
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between flex-wrap gap-2">
             <span className="text-xs font-semibold uppercase tracking-wider text-emerald-700 flex items-center gap-1.5">
               <CheckCircle2 className="h-4 w-4 text-emerald-600" />
               Request Recorded Successfully
             </span>
-            <Badge className="bg-emerald-100 text-emerald-800 border-emerald-300">
-              ID: {submittedResult.id.slice(0, 8)}
-            </Badge>
+            <div className="flex items-center gap-2">
+              <Badge variant="outline" className="bg-white text-xs border-emerald-300">
+                {submittedProvider === "supabase" ? "Persisted to Supabase Postgres" : "Saved in Active Demo Store"}
+              </Badge>
+              <Badge className="bg-emerald-100 text-emerald-800 border-emerald-300">
+                ID: {submittedResult.id.slice(0, 8)}
+              </Badge>
+            </div>
           </div>
           <CardTitle className="text-xl font-bold text-foreground mt-2">
             Citizen Demand Signal Queued
@@ -293,7 +348,7 @@ export function RequestForm() {
                 className: "w-full sm:w-auto bg-primary hover:bg-[#1E40AF] text-white font-medium",
               })}
             >
-              <span>View planning signals</span>
+              <span>View Planning Signals</span>
               <ArrowRight className="h-4 w-4 ml-1.5" />
             </Link>
             <Button
@@ -308,6 +363,15 @@ export function RequestForm() {
       </Card>
     );
   }
+
+  // Pre-conditions for submitting review
+  const canSubmit = Boolean(
+    editableDistrict &&
+    editableState &&
+    (!extraction?.isFallback || manualReviewConfirmed) &&
+    (!isExampleLoaded || demoAcknowledged) &&
+    !isSubmitting
+  );
 
   return (
     <div className="space-y-6">
@@ -327,10 +391,11 @@ export function RequestForm() {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-5">
-          {/* Try an Example Section (Clearly distinct from real submission) */}
+          {/* Try an Example Section (Clearly marked as demo content) */}
           <div className="space-y-1.5 p-3 rounded-lg bg-slate-50 border border-slate-200">
             <div className="flex items-center justify-between">
-              <span className="text-xs font-semibold text-foreground">
+              <span className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+                <Info className="h-3.5 w-3.5 text-blue-600" />
                 Try an example (Demo content):
               </span>
               {activeExampleLabel && (
@@ -359,9 +424,9 @@ export function RequestForm() {
                 </button>
               ))}
             </div>
-            {activeExampleLabel && (
-              <p className="text-[11px] text-blue-800 pt-1">
-                Demo example loaded: <strong>{activeExampleLabel}</strong>. Click <em>Analyze Request</em> to review structured extraction before submitting.
+            {isExampleLoaded && (
+              <p className="text-[11px] text-amber-800 bg-amber-50/80 p-2 rounded border border-amber-200 mt-2">
+                <strong>Demo Content Loaded:</strong> This is a sample request for testing. You will be required to confirm this is demo content before submitting.
               </p>
             )}
           </div>
@@ -382,8 +447,17 @@ export function RequestForm() {
                 rows={4}
                 value={rawText}
                 onChange={(e) => {
-                  setRawText(e.target.value);
-                  if (activeExampleLabel) setActiveExampleLabel(null);
+                  const val = e.target.value;
+                  setRawText(val);
+                  if (activeExampleLabel) {
+                    const isExactMatch = TRY_AN_EXAMPLE_SAMPLES.some((s) => s.text === val.trim());
+                    if (!isExactMatch) {
+                      setActiveExampleLabel(null);
+                      setIsExampleLoaded(false);
+                      setDemoAcknowledged(false);
+                    }
+                  }
+                  if (analysisError) setAnalysisError(null);
                 }}
                 placeholder="e.g. In Ramanagara, the road connecting our village to the main highway is washed out every monsoon..."
                 className="bg-white border-border"
@@ -533,27 +607,27 @@ export function RequestForm() {
       {/* State 2: Extraction Preview & Verification Card */}
       {extraction && (
         <Card className={`bg-white shadow-sm animate-in fade-in duration-300 ${
-          extraction.source === "gemini" ? "border-primary/40" : "border-amber-300"
+          extraction.source === "gemini" && !extraction.isFallback ? "border-primary/40" : "border-amber-300"
         }`}>
           <CardHeader className={`pb-3 border-b border-border ${
-            extraction.source === "gemini" ? "bg-blue-50/40" : "bg-amber-50/40"
+            extraction.source === "gemini" && !extraction.isFallback ? "bg-blue-50/40" : "bg-amber-50/40"
           }`}>
             <div className="flex items-center justify-between flex-wrap gap-2">
               <div className="flex items-center gap-2">
                 <span className={`text-xs font-semibold uppercase tracking-wider ${
-                  extraction.source === "gemini" ? "text-primary" : "text-amber-800"
+                  extraction.source === "gemini" && !extraction.isFallback ? "text-primary" : "text-amber-800"
                 }`}>
-                  {extraction.source === "gemini" ? "AI Extraction Preview" : "Manual Fallback Review"}
+                  {extraction.source === "gemini" && !extraction.isFallback ? "AI Extraction Preview" : "Manual Fallback Review (AI Unavailable)"}
                 </span>
                 <Badge
                   variant="outline"
                   className={
-                    extraction.source === "gemini"
+                    extraction.source === "gemini" && !extraction.isFallback
                       ? "bg-blue-50 text-blue-700 border-blue-200 text-xs"
                       : "bg-amber-100 text-amber-800 border-amber-300 text-xs font-medium"
                   }
                 >
-                  {extraction.source === "gemini" ? "Analyzed by Gemini 3.8 Flash" : "Manual Fallback Mode"}
+                  {extraction.source === "gemini" && !extraction.isFallback ? "Analyzed by Gemini 3.8 Flash" : "Manual Fallback Mode"}
                 </Badge>
               </div>
 
@@ -562,7 +636,7 @@ export function RequestForm() {
                   Language: {extraction.language}
                 </Badge>
                 {/* AI Confidence is shown ONLY for genuine successful Gemini extractions */}
-                {extraction.source === "gemini" && extraction.confidence !== null ? (
+                {extraction.source === "gemini" && !extraction.isFallback && extraction.confidence !== null ? (
                   <Badge
                     variant="outline"
                     className={`text-xs ${
@@ -598,7 +672,7 @@ export function RequestForm() {
                   How JanSanket uses Gemini:
                 </p>
                 <p className="text-blue-800 leading-snug">
-                  Gemini converts the citizen&apos;s message into structured information so requests can be grouped and compared across districts.
+                  Gemini converts the citizen&apos;s message into structured information (language, category, location, severity, and English need summary) so requests can be grouped and compared across districts. Gemini does NOT compute priority scores or allocate budgets—that is calculated deterministically by JanSanket&apos;s planning algorithm.
                 </p>
                 <div className="pt-0.5 flex items-center gap-1.5 text-[11px] text-blue-700 font-medium flex-wrap">
                   <span>Citizen Language</span>
@@ -607,7 +681,7 @@ export function RequestForm() {
                   <span>&rarr;</span>
                   <span>Application aggregates requests</span>
                   <span>&rarr;</span>
-                  <span>Planning signal on dashboard</span>
+                  <span>Deterministic planning score</span>
                 </div>
               </div>
             </div>
@@ -626,7 +700,7 @@ export function RequestForm() {
             )}
 
             {/* BUG 2: Unsupported District Alert (e.g. Goa / Anjuna) */}
-            {!extraction.isSupportedDistrict && (
+            {(!extraction.isSupportedDistrict || !editableDistrict) && (
               <Alert className="bg-amber-50 border-amber-300 text-amber-900 py-2.5">
                 <ShieldAlert className="h-4 w-4 text-amber-700 shrink-0" />
                 <div>
@@ -641,7 +715,7 @@ export function RequestForm() {
                       </>
                     ) : (
                       <>
-                        No supported pilot district was detected in your request. Please select a supported district below to proceed.
+                        This district is outside the current demo coverage. Please select a supported district from the 8 pilot districts below.
                       </>
                     )}
                   </AlertDescription>
@@ -661,10 +735,11 @@ export function RequestForm() {
               </div>
 
               <div>
-                <label className="font-semibold text-muted-foreground block">
+                <label htmlFor="needSummaryInput" className="font-semibold text-muted-foreground block">
                   What We Understood (English Normalized Need):
                 </label>
                 <input
+                  id="needSummaryInput"
                   type="text"
                   value={editableNeedSummary}
                   onChange={(e) => setEditableNeedSummary(e.target.value)}
@@ -677,10 +752,11 @@ export function RequestForm() {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               {/* Category Select */}
               <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-muted-foreground block">
+                <label htmlFor="categorySelect" className="text-xs font-semibold text-muted-foreground block">
                   Infrastructure Category
                 </label>
                 <select
+                  id="categorySelect"
                   value={editableCategory}
                   onChange={(e) => setEditableCategory(e.target.value as InfrastructureCategory)}
                   className="w-full rounded-md border border-input bg-white px-3 py-2 text-sm shadow-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
@@ -695,10 +771,11 @@ export function RequestForm() {
 
               {/* Severity Select */}
               <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-muted-foreground block">
+                <label htmlFor="severitySelect" className="text-xs font-semibold text-muted-foreground block">
                   Severity Level
                 </label>
                 <select
+                  id="severitySelect"
                   value={editableSeverity}
                   onChange={(e) => setEditableSeverity(e.target.value as Severity)}
                   className="w-full rounded-md border border-input bg-white px-3 py-2 text-sm shadow-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
@@ -713,13 +790,14 @@ export function RequestForm() {
 
               {/* Supported District Select (Strictly 8 Supported Districts) */}
               <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-muted-foreground block">
+                <label htmlFor="targetDistrictSelect" className="text-xs font-semibold text-muted-foreground block">
                   Target District <span className="text-destructive">*</span>
                   {!editableDistrict && (
                     <span className="text-amber-700 font-normal ml-1">(Required: select a supported district)</span>
                   )}
                 </label>
                 <select
+                  id="targetDistrictSelect"
                   value={editableDistrict}
                   onChange={(e) => {
                     const sel = ALL_SUPPORTED_DISTRICTS.find((d) => d.district === e.target.value);
@@ -729,6 +807,7 @@ export function RequestForm() {
                       setSubmissionError(null);
                     } else {
                       setEditableDistrict("");
+                      setEditableState("");
                     }
                   }}
                   className={`w-full rounded-md border px-3 py-2 text-sm shadow-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring ${
@@ -744,19 +823,60 @@ export function RequestForm() {
                 </select>
               </div>
 
-              {/* State (Read-only reference) */}
+              {/* State (Strictly derived from district) */}
               <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-muted-foreground block">
+                <label htmlFor="stateReadonly" className="text-xs font-semibold text-muted-foreground block">
                   State / Territory
                 </label>
                 <input
+                  id="stateReadonly"
                   type="text"
-                  value={editableState || "(Select a district above)"}
+                  value={editableState || "(Select a supported district)"}
                   readOnly
                   className="w-full rounded-md border border-input bg-slate-50 px-3 py-2 text-sm text-muted-foreground cursor-not-allowed"
                 />
               </div>
             </div>
+
+            {/* BUG 3: Explicit Manual Fallback Review Confirmation Checkbox */}
+            {extraction.isFallback && (
+              <div className="p-3 bg-amber-50/80 border border-amber-300 rounded-md">
+                <label className="flex items-start gap-2.5 text-xs text-amber-950 font-medium cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={manualReviewConfirmed}
+                    onChange={(e) => {
+                      setManualReviewConfirmed(e.target.checked);
+                      if (submissionError) setSubmissionError(null);
+                    }}
+                    className="mt-0.5 h-4 w-4 rounded border-amber-400 text-primary focus:ring-primary"
+                  />
+                  <span>
+                    I confirm that I have reviewed the category, location, and severity values above, and acknowledge this request was categorized using manual fallback.
+                  </span>
+                </label>
+              </div>
+            )}
+
+            {/* BUG 6: Canned Demo Example Acknowledgment Checkbox */}
+            {isExampleLoaded && (
+              <div className="p-3 bg-blue-50/80 border border-blue-200 rounded-md">
+                <label className="flex items-start gap-2.5 text-xs text-blue-950 font-medium cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={demoAcknowledged}
+                    onChange={(e) => {
+                      setDemoAcknowledged(e.target.checked);
+                      if (submissionError) setSubmissionError(null);
+                    }}
+                    className="mt-0.5 h-4 w-4 rounded border-blue-300 text-primary focus:ring-primary"
+                  />
+                  <span>
+                    I confirm this request is a <strong>demo test submission</strong> based on sample data.
+                  </span>
+                </label>
+              </div>
+            )}
 
             {submissionError && (
               <Alert variant="destructive" className="py-2.5">
@@ -770,7 +890,7 @@ export function RequestForm() {
               <Button
                 type="button"
                 onClick={handleConfirmSubmit}
-                disabled={isSubmitting || !editableDistrict}
+                disabled={!canSubmit}
                 className="w-full sm:w-auto bg-primary hover:bg-[#1E40AF] text-white font-medium"
               >
                 {isSubmitting ? "Submitting Request…" : "Confirm & Submit Request"}

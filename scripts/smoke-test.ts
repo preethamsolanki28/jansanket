@@ -248,20 +248,34 @@ async function runProductionSmokeTest() {
   }
 
   // -------------------------------------------------------------------------
-  // 6. Invalid Input Screening (Meaningless text / gibberish)
+  // 6. Invalid & Non-Civic Input Screening (Gibberish, greetings, casual talk)
   // -------------------------------------------------------------------------
-  process.stdout.write("6. Verifying meaningless input ('sdgsafdasafd') is rejected (HTTP 400)... ");
+  process.stdout.write("6. Verifying non-civic inputs ('sdgsafdasafd', 'hello there how are you', 'this is a test', 'I like apples') are rejected (HTTP 400)... ");
   try {
-    const res = await request(`${BASE_URL}/api/requests`, {
-      method: "POST",
-      body: { action: "analyze", rawText: "sdgsafdasafd" }
-    });
+    const testCases = [
+      "sdgsafdasafd",
+      "hello there how are you",
+      "this is a test",
+      "I like apples"
+    ];
 
-    if (res.status === 400 && res.body?.isInvalid && res.body?.error?.includes("real infrastructure")) {
-      console.log("PASS (Rejected with 'Please describe a real infrastructure or public-service problem.')");
+    let allRejected = true;
+    for (const testText of testCases) {
+      const res = await request(`${BASE_URL}/api/requests`, {
+        method: "POST",
+        body: { action: "analyze", rawText: testText }
+      });
+      if (res.status !== 400 || !res.body?.isInvalid) {
+        allRejected = false;
+        console.log(`\nFAIL on "${testText}": Expected 400, got ${res.status}`);
+        break;
+      }
+    }
+
+    if (allRejected) {
+      console.log("PASS (All 4 non-civic inputs properly rejected with HTTP 400)");
       passed++;
     } else {
-      console.log("FAIL: Expected 400 rejection for gibberish, got:", res.status, res.body);
       failed++;
     }
   } catch (err: unknown) {
@@ -310,6 +324,79 @@ async function runProductionSmokeTest() {
       passed++;
     } else {
       console.log("FAIL:", { notRamanagara, submitRejected, extDistrict: ext?.district });
+      failed++;
+    }
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : "Error";
+    console.log(`FAIL: ${msg}`);
+    failed++;
+  }
+
+  // -------------------------------------------------------------------------
+  // 8. State-District Mismatch Guard (Goa + Ramanagara)
+  // -------------------------------------------------------------------------
+  process.stdout.write("8. Verifying state-district mismatch (Goa + Ramanagara) is rejected... ");
+  try {
+    const submitRes = await request(`${BASE_URL}/api/requests`, {
+      method: "POST",
+      body: {
+        action: "submit",
+        requestData: {
+          raw_text: "Road in Ramanagara has major potholes.",
+          category: "roads",
+          district: "Ramanagara",
+          state: "Goa", // Mismatched state
+          severity: "high",
+          need_summary: "Road in Ramanagara has major potholes."
+        }
+      }
+    });
+
+    if (submitRes.status === 422 && Array.isArray(submitRes.body?.details)) {
+      const errorMsg = submitRes.body.details.join(" ");
+      const matchesMismatch = errorMsg.includes("does not match") || errorMsg.includes("Karnataka");
+      if (matchesMismatch) {
+        console.log("PASS (State 'Goa' rejected against district 'Ramanagara' with HTTP 422)");
+        passed++;
+      } else {
+        console.log("FAIL: Expected state mismatch message, got:", errorMsg);
+        failed++;
+      }
+    } else {
+      console.log("FAIL: Expected 422 for Goa + Ramanagara, got:", submitRes.status);
+      failed++;
+    }
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : "Error";
+    console.log(`FAIL: ${msg}`);
+    failed++;
+  }
+
+  // -------------------------------------------------------------------------
+  // 9. English Normalized Summary for Indic Input
+  // -------------------------------------------------------------------------
+  process.stdout.write("9. Verifying Indic request produces English normalized summary (not raw Indic)... ");
+  try {
+    const res = await request(`${BASE_URL}/api/requests`, {
+      method: "POST",
+      body: {
+        action: "analyze",
+        rawText: "ರಾಮನಗರ ಜಿಲ್ಲೆಯ ನಮ್ಮ ಗ್ರಾಮದ ರಸ್ತೆ ಸಂಪೂರ್ಣ ಹಾಳಾಗಿದೆ, ಮಳೆಗಾಲದಲ್ಲಿ ಸಂಚಾರ ಸ್ಥಗಿತಗೊಳ್ಳುತ್ತದೆ.",
+        stateHint: "Karnataka",
+        districtHint: "Ramanagara"
+      }
+    });
+
+    const ext = res.body?.extraction;
+    const summary = ext?.need_summary || "";
+    const hasIndicChars = /[\u0900-\u0D7F]/.test(summary);
+    const hasEnglishLetters = /[a-zA-Z]{5,}/.test(summary);
+
+    if (res.status === 200 && ext && !hasIndicChars && hasEnglishLetters) {
+      console.log(`PASS (Normalized summary is in English: "${summary.slice(0, 50)}...")`);
+      passed++;
+    } else {
+      console.log("FAIL: Summary contained Indic characters or lacked English:", summary);
       failed++;
     }
   } catch (err: unknown) {

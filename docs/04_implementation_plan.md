@@ -317,8 +317,16 @@ Only perform this task if TASK-003 marked voice **KEEP**.
 - [x] Visual badge indicates demo content; prevents accidental submission without analysis.
 
 ### TASK-062 — Plain-Language Dashboard Presentation [DONE]
-- [x] Replaced technical jargon with plain civic terms: *Citizen Demand*, *Infrastructure Need*, *People Affected*, *Current Coverage*, *Unaddressed Need*, *Why this area is highlighted*.
-- [x] Preserved 100% of underlying deterministic priority math.
+### TASK-063 — Database Write Security & Supabase Fallback Hardening [DONE]
+- [x] Enforced `service_role` on `citizen_requests` inserts (`20260929000004_fix_write_security.sql`).
+- [x] Completely removed anonymous browser insert permissions from Supabase RLS.
+- [x] Hardened `lib/db.ts` to throw error on failed Supabase write when configured; returns HTTP 503 instead of silently claiming demo store success.
+- [x] UI displays explicit persistence provider badge: *Persisted to Supabase Postgres* or *Saved in Active Demo Store*.
+
+### TASK-064 — Non-Civic Input & State-District Pair Matching [DONE]
+- [x] Expanded semantic check to reject conversational chit-chat, greetings, test spam, and casual statements (*"hello there how are you"*, *"this is a test"*, *"I like apples"*).
+- [x] Enforced matching state + district pair verification (*Goa + Ramanagara* rejected with HTTP 422).
+- [x] Rejection occurs before requests can reach submission pipeline.
 
 ---
 
@@ -332,9 +340,9 @@ Only perform this task if TASK-003 marked voice **KEEP**.
 | M3 | 90 min |
 | M4 | 90 min |
 | M5 | 115 min |
-| **Post-M5 Stabilization** | **45 min** |
-| **Planned total** | **8h 20m–8h 35m** |
-| **Recovery reserve** | **~3h 25m–3h 40m** |
+| **Post-M5 Stabilization** | **60 min** |
+| **Planned total** | **8h 35m–8h 50m** |
+| **Recovery reserve** | **~3h 10m–3h 25m** |
 
 ## Cut list — exact order
 
@@ -349,17 +357,18 @@ Only perform this task if TASK-003 marked voice **KEEP**.
 
 ## Smoke-test verification checklist
 
-Automated test verification is provided via `npx tsx scripts/smoke-test.ts` (covers dashboard load, seed validation, multilingual extraction, validation guards, persistence recalculation, gibberish screening, and outside-scope boundary checks).
+Automated test verification is provided via `npx tsx scripts/smoke-test.ts` (covers dashboard load, seed validation, multilingual extraction, validation guards, persistence recalculation, secret leakage, non-civic input screening, demo boundary protection, state-district mismatch, and English normalization).
 
-### Local & Production Verification [ALL 7 PASSED]
+### Local & Production Verification [ALL 9 PASSED]
 
 - [x] `npm run dev` starts cleanly on port 3000.
 - [x] `/dashboard` loads with seeded data (52+ requests, 8 districts, 48 context rows).
-- [x] Plain-language presentation: Citizen demand, Infrastructure need, People affected, Current coverage, Unaddressed need.
-- [x] 1-Click *"Try an example"* loads diverse demo cases (Kannada, Hindi, Tamil, English) without accidental submission traps.
-- [x] Meaningless input (`sdgsafdasafd`) rejected with HTTP 400: *"Please describe a real infrastructure or public-service problem."*
+- [x] Plain-language presentation: Citizen demand, Infrastructure need, People affected, Current coverage, Unaddressed need, Why This Area Needs Attention.
+- [x] 1-Click *"Try an example"* loads diverse demo cases (Kannada, Hindi, Tamil, English) with demo acknowledgment requirement before submission.
+- [x] Meaningless and non-civic input (`sdgsafdasafd`, `hello there how are you`, `this is a test`, `I like apples`) rejected with HTTP 400: *"Please describe a real infrastructure or public-service problem."*
 - [x] Outside district (`Goa / Anjuna`) never converted to Ramanagara; flagged as outside coverage and rejected on submit.
+- [x] State-district mismatch (`Goa + Ramanagara`) rejected with HTTP 422: state does not match district.
 - [x] HTTP 429 quota exhaustion handled with zero fake confidence, zero default districts, and clear manual fallback status.
 - [x] Kannada and Indic inputs produce genuine English normalized summaries (never raw Indic script in English field).
 - [x] Valid submission saves once and dynamically recalculates total requests and hotspot priority score.
-- [x] Automated smoke-test suite passes 7/7 (`npx tsx scripts/smoke-test.ts`).
+- [x] Automated smoke-test suite passes 9/9 (`npx tsx scripts/smoke-test.ts`).
