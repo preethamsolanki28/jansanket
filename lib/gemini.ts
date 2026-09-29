@@ -3,36 +3,59 @@
  * Strictly runs server-side only. GEMINI_API_KEY is never exposed to the client.
  */
 
-import { findCanonicalDistrict, isValidCategory, isValidSeverity, InfrastructureCategory, Severity } from "./validation";
+import {
+  findCanonicalDistrict,
+  checkDistrictCoverage,
+  isMeaningfulRequest,
+  isValidCategory,
+  isValidSeverity,
+  InfrastructureCategory,
+  Severity,
+} from "./validation";
 
 export interface GeminiExtractionResult {
+  isValidRequest: boolean;
+  rejectionReason?: string;
+  source: "gemini" | "manual_fallback";
   language: string;
+  originalText: string;
   state: string | null;
   district: string | null;
   category: InfrastructureCategory;
   need_summary: string;
   severity: Severity;
-  confidence: number;
-  isFallback?: boolean;
+  confidence: number | null; // null for manual_fallback; 0.0-1.0 for Gemini
+  isFallback: boolean;
   fallbackReason?: string;
+  isSupportedDistrict: boolean;
+  unsupportedDistrictName?: string | null;
 }
 
 const SYSTEM_INSTRUCTION = `You are an AI assistant for JanSanket, an Indian Digital Public Good infrastructure planning intelligence platform.
 Your task is to analyze unstructured citizen development requests and extract structured planning evidence.
 Rules:
-1. Extract rather than invent.
-2. Normalize Indian state and district names (e.g. "रामनगर" or "Ramanagara" -> "Ramanagara", "தருமபுரி" -> "Dharmapuri").
-3. If district or state is not mentioned or uncertain, return null for those fields.
+1. Assess Validity: Determine if the request describes a real infrastructure, public service, or community development problem. If the input is random characters, keyboard gibberish, spam (e.g. "sdgsafdasafd", "asdfghjkl"), greeting-only, or contains no civic issue, set is_valid_request to false, confidence to 0.0, and provide a clear rejection_reason ("Please describe a real infrastructure or public-service problem.").
+2. Extract rather than invent. Do NOT assign a default district if none was mentioned.
+3. Normalize Indian state and district names if mentioned (e.g. "रामनगर" or "Ramanagara" -> "Ramanagara", "தருமபுரி" -> "Dharmapuri"). If district or state is not mentioned or uncertain, return null.
 4. Categorize into exactly one of: "roads", "water", "sanitation", "healthcare", "education", "power", "transport", "other".
-5. Produce a concise need summary in English (1 sentence).
+5. Translate & Summarize in English: Produce a clear, concise one-sentence summary of the development need strictly in ENGLISH. If the input is in Kannada, Hindi, Tamil, or any regional language, translate the meaning into English. NEVER return the original non-English script in need_summary.
 6. Rate severity as "low", "medium", or "high".
-7. Provide an extraction confidence score between 0.0 and 1.0.
+7. Provide an extraction confidence score between 0.0 and 1.0 (0.0 if invalid).
 8. Identify language code (e.g. "en", "hi", "kn", "ta").
 9. Never decide public spending, budget, or project approval.`;
 
 const RESPONSE_SCHEMA = {
   type: "OBJECT",
   properties: {
+    is_valid_request: {
+      type: "BOOLEAN",
+      description: "False if the input is random characters, keyboard gibberish, test spam, or contains no civic/infrastructure problem. True if it describes a real public need."
+    },
+    rejection_reason: {
+      type: "STRING",
+      nullable: true,
+      description: "If is_valid_request is false, explain why (e.g. 'Please describe a real infrastructure or public-service problem.')"
+    },
     language: {
       type: "STRING",
       description: "ISO language code, e.g. en, hi, kn, ta"
@@ -54,7 +77,7 @@ const RESPONSE_SCHEMA = {
     },
     need_summary: {
       type: "STRING",
-      description: "Concise one-sentence summary of the development need in English"
+      description: "Concise one-sentence summary of the development need strictly translated into English. Never return regional non-English script."
     },
     severity: {
       type: "STRING",
@@ -66,12 +89,16 @@ const RESPONSE_SCHEMA = {
       description: "Model confidence in extraction from 0.0 to 1.0"
     }
   },
-  required: ["language", "category", "need_summary", "severity", "confidence"]
+  required: ["is_valid_request", "language", "category", "need_summary", "severity", "confidence"]
 };
 
 /**
- * Intelligent deterministic fallback when Gemini API is unavailable (503/429/network outage)
- * Implements TASK-023: Error fallback so the user is never trapped.
+ * Deterministic fallback when Gemini API is unavailable (e.g. HTTP 429 quota exhaustion or network outage)
+ * Implements strict boundaries:
+ * - Detects invalid/gibberish input and marks invalid
+ * - Does NOT return fake confidence
+ * - Does NOT silently assign Ramanagara or any other district
+ * - Translates known categories into clear English summaries instead of copying raw Indic text
  */
 export function getPreparedFallback(
   rawText: string,
@@ -79,15 +106,37 @@ export function getPreparedFallback(
   districtHint?: string,
   reason?: string
 ): GeminiExtractionResult {
+  // 1. Meaningfulness / gibberish check
+  const meaning = isMeaningfulRequest(rawText);
+  if (!meaning.isValid) {
+    return {
+      isValidRequest: false,
+      rejectionReason: meaning.reason || "Please describe a real infrastructure or public-service problem.",
+      source: "manual_fallback",
+      language: "en",
+      originalText: rawText,
+      state: null,
+      district: null,
+      category: "other",
+      need_summary: "",
+      severity: "medium",
+      confidence: null, // Zero fake confidence
+      isFallback: true,
+      fallbackReason: reason || "AI analysis is temporarily unavailable. You can continue using the manual fallback.",
+      isSupportedDistrict: false,
+      unsupportedDistrictName: null
+    };
+  }
+
   const lower = rawText.toLowerCase();
 
-  // 1. Language detection heuristic
+  // 2. Language detection heuristic
   let language = "en";
   if (/[\u0900-\u097F]/.test(rawText)) language = "hi";
   else if (/[\u0C80-\u0CFF]/.test(rawText)) language = "kn";
   else if (/[\u0B80-\u0BFF]/.test(rawText)) language = "ta";
 
-  // 2. Category heuristic
+  // 3. Category heuristic
   let category: InfrastructureCategory = "other";
   if (
     lower.includes("road") ||
@@ -183,25 +232,79 @@ export function getPreparedFallback(
     category = "transport";
   }
 
-  // 3. Location extraction heuristic
-  const foundDistrict =
-    findCanonicalDistrict(districtHint) ||
-    findCanonicalDistrict(stateHint) ||
-    findCanonicalDistrict(rawText);
+  // 4. English normalized need summary (never copy raw Indic text into English field)
+  let need_summary = "";
+  if (language === "en") {
+    need_summary = rawText.length > 120 ? `${rawText.slice(0, 117)}...` : rawText;
+  } else {
+    // Meaningful English synthesis based on detected category
+    switch (category) {
+      case "roads":
+        need_summary = "Citizen reported village road access, damage, or connectivity issues.";
+        break;
+      case "water":
+        need_summary = "Citizen reported drinking water supply shortage or pipeline issues.";
+        break;
+      case "sanitation":
+        need_summary = "Citizen reported drainage overflow, sewage blockage, or waste disposal deficit.";
+        break;
+      case "healthcare":
+        need_summary = "Citizen reported lack of primary healthcare staff, clinic access, or medicine.";
+        break;
+      case "education":
+        need_summary = "Citizen reported school building infrastructure or classroom facility issues.";
+        break;
+      case "power":
+        need_summary = "Citizen reported electricity outages or transformer failure.";
+        break;
+      case "transport":
+        need_summary = "Citizen reported public transport or bus connectivity issues.";
+        break;
+      default:
+        need_summary = "Citizen reported local public service or infrastructure need.";
+    }
+  }
 
-  // 4. Need summary
-  const need_summary = rawText.length > 120 ? `${rawText.slice(0, 117)}...` : rawText;
+  // 5. Location extraction & Coverage verification
+  let candidateDistrict: string | null = null;
+  let candidateState: string | null = null;
+
+  if (districtHint?.trim()) {
+    candidateDistrict = districtHint.trim();
+  }
+  if (stateHint?.trim()) {
+    candidateState = stateHint.trim();
+  }
+
+  // Also check if canonical district is mentioned directly in rawText
+  const districtInText = findCanonicalDistrict(rawText);
+  if (districtInText) {
+    candidateDistrict = districtInText.district;
+    candidateState = districtInText.state;
+  }
+
+  const coverage = candidateDistrict ? checkDistrictCoverage(candidateDistrict, candidateState) : null;
+
+  const isSupportedDistrict = Boolean(coverage?.isSupported);
+  const canonicalDistrict = coverage?.isSupported ? coverage.canonical?.district || null : null;
+  const canonicalState = coverage?.isSupported ? coverage.canonical?.state || null : (candidateState || null);
+  const unsupportedDistrictName = candidateDistrict && !coverage?.isSupported ? candidateDistrict : null;
 
   return {
+    isValidRequest: true,
+    source: "manual_fallback",
     language,
-    state: foundDistrict?.state || (stateHint?.trim() || null),
-    district: foundDistrict?.district || (districtHint?.trim() || null),
+    originalText: rawText,
+    state: canonicalState,
+    district: canonicalDistrict, // null if unsupported or unmentioned (NEVER default to Ramanagara)
     category,
     need_summary,
-    severity: "high",
-    confidence: 0.85,
+    severity: "medium",
+    confidence: null, // Strictly null for fallback to avoid fake AI confidence
     isFallback: true,
-    fallbackReason: reason || "AI analysis is unavailable right now. Continue with the fallback input path."
+    fallbackReason: reason || "AI analysis is temporarily unavailable (API quota limit reached). You can continue using the manual fallback.",
+    isSupportedDistrict,
+    unsupportedDistrictName
   };
 }
 
@@ -213,6 +316,27 @@ export async function normalizeRequestWithGemini(
   stateHint?: string,
   districtHint?: string
 ): Promise<GeminiExtractionResult> {
+  // Pre-screen for meaningless input
+  const preCheck = isMeaningfulRequest(rawText);
+  if (!preCheck.isValid) {
+    return {
+      isValidRequest: false,
+      rejectionReason: preCheck.reason || "Please describe a real infrastructure or public-service problem.",
+      source: "gemini",
+      language: "en",
+      originalText: rawText,
+      state: null,
+      district: null,
+      category: "other",
+      need_summary: "",
+      severity: "medium",
+      confidence: 0.0,
+      isFallback: false,
+      isSupportedDistrict: false,
+      unsupportedDistrictName: null
+    };
+  }
+
   const apiKey = process.env.GEMINI_API_KEY;
   const model = process.env.GEMINI_MODEL || "gemini-3.8-flash";
 
@@ -221,7 +345,7 @@ export async function normalizeRequestWithGemini(
       rawText,
       stateHint,
       districtHint,
-      "AI analysis is unavailable right now (API key not configured). Continue with the fallback input path."
+      "AI analysis is temporarily unavailable (API key not configured). You can continue using the manual fallback."
     );
   }
 
@@ -256,11 +380,14 @@ export async function normalizeRequestWithGemini(
     if (!res.ok) {
       const errText = await res.text();
       console.warn(`Gemini API returned ${res.status}: ${errText}`);
+      const isQuota = res.status === 429;
       return getPreparedFallback(
         rawText,
         stateHint,
         districtHint,
-        `AI analysis is unavailable right now (HTTP ${res.status}). Continue with the fallback input path.`
+        isQuota
+          ? "AI analysis is temporarily unavailable (API quota limit reached). You can continue using the manual fallback."
+          : `AI analysis is temporarily unavailable (HTTP ${res.status}). You can continue using the manual fallback.`
       );
     }
 
@@ -283,24 +410,67 @@ export async function normalizeRequestWithGemini(
 
     const parsed = JSON.parse(cleanJson);
 
-    // Validate and canonicalize extracted category
+    // 1. Model determined the input was invalid/gibberish
+    if (parsed.is_valid_request === false) {
+      return {
+        isValidRequest: false,
+        rejectionReason: parsed.rejection_reason || "Please describe a real infrastructure or public-service problem.",
+        source: "gemini",
+        language: parsed.language || "en",
+        originalText: rawText,
+        state: null,
+        district: null,
+        category: "other",
+        need_summary: "",
+        severity: "medium",
+        confidence: 0.0,
+        isFallback: false,
+        isSupportedDistrict: false,
+        unsupportedDistrictName: null
+      };
+    }
+
+    // 2. Validate and canonicalize category
     const category = isValidCategory(parsed.category) ? parsed.category : "other";
 
-    // Validate severity
+    // 3. Validate severity
     const severity = isValidSeverity(parsed.severity) ? parsed.severity : "medium";
 
-    // Match with canonical districts
-    const canonical = findCanonicalDistrict(parsed.district) || findCanonicalDistrict(districtHint);
+    // 4. District validation & coverage check
+    const rawDistrict = parsed.district || districtHint || null;
+    const rawState = parsed.state || stateHint || null;
+    const coverage = checkDistrictCoverage(rawDistrict, rawState);
+
+    const isSupportedDistrict = Boolean(coverage.isSupported);
+    const canonicalDistrict = coverage.isSupported ? coverage.canonical?.district || null : null;
+    const canonicalState = coverage.isSupported ? coverage.canonical?.state || null : rawState;
+    const unsupportedDistrictName = rawDistrict && !coverage.isSupported ? rawDistrict : null;
+
+    // 5. Validated need summary
+    let needSummary = typeof parsed.need_summary === "string" ? parsed.need_summary.trim() : "";
+    if (!needSummary) {
+      needSummary = rawText;
+    }
+
+    // 6. Confidence
+    const confidence = typeof parsed.confidence === "number"
+      ? Math.min(1, Math.max(0, Math.round(parsed.confidence * 100) / 100))
+      : 0.9;
 
     return {
+      isValidRequest: true,
+      source: "gemini",
       language: parsed.language || "en",
-      state: canonical?.state || parsed.state || stateHint || null,
-      district: canonical?.district || parsed.district || districtHint || null,
+      originalText: rawText,
+      state: canonicalState,
+      district: canonicalDistrict, // null if unsupported or unmentioned (NEVER default to Ramanagara)
       category,
-      need_summary: parsed.need_summary || rawText,
+      need_summary: needSummary,
       severity,
-      confidence: typeof parsed.confidence === "number" ? Math.min(1, Math.max(0, parsed.confidence)) : 0.9,
-      isFallback: false
+      confidence,
+      isFallback: false,
+      isSupportedDistrict,
+      unsupportedDistrictName
     };
   } catch (error: unknown) {
     const errorMsg = error instanceof Error ? error.message : "Unknown error";
@@ -309,7 +479,7 @@ export async function normalizeRequestWithGemini(
       rawText,
       stateHint,
       districtHint,
-      "AI analysis is unavailable right now. Continue with the fallback input path."
+      "AI analysis is temporarily unavailable. You can continue using the manual fallback."
     );
   }
 }

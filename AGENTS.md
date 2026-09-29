@@ -27,7 +27,7 @@ Ask when anything is ambiguous.
 
 ## MVP non-negotiables
 
-- Text is the guaranteed citizen-intake path.
+- Text is the guaranteed citizen-intake path with 1-click multilingual presets (voice was evaluated in TASK-003 and cut due to mobile latency/permissions).
 - Voice is optional and must not block the text flow.
 - Gemini interprets unstructured input; deterministic application logic computes the planning signal.
 - District context is keyed by `state + district + category`.
@@ -65,10 +65,16 @@ npm run lint
 npm run build
 ```
 
+### Production Smoke Test
+
+```bash
+npx tsx scripts/smoke-test.ts
+```
+
 Before committing, run at minimum:
 
 ```bash
-npm run typecheck && npm run build
+npm run typecheck && npm run build && npx tsx scripts/smoke-test.ts
 ```
 
 If one of these scripts does not exist in `package.json`, add the script rather than assuming it exists.

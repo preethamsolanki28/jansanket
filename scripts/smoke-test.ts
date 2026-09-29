@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 /**
  * End-to-End Production Smoke Test for JanSanket (TASK-052)
  *
@@ -19,7 +20,7 @@ import https from "https";
 
 const BASE_URL = process.env.APP_URL || "http://localhost:3000";
 
-function request(urlStr: string, options: { method?: string; body?: any; headers?: Record<string, string> } = {}): Promise<{ status: number; headers: http.IncomingHttpHeaders; body: any; raw: string }> {
+function request(urlStr: string, options: { method?: string; body?: unknown; headers?: Record<string, string> } = {}): Promise<{ status: number; headers: http.IncomingHttpHeaders; body: any; raw: string }> {
   return new Promise((resolve, reject) => {
     const url = new URL(urlStr);
     const client = url.protocol === "https:" ? https : http;
@@ -238,6 +239,77 @@ async function runProductionSmokeTest() {
       passed++;
     } else {
       console.log("FAIL: Secret pattern found in HTTP response body!");
+      failed++;
+    }
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : "Error";
+    console.log(`FAIL: ${msg}`);
+    failed++;
+  }
+
+  // -------------------------------------------------------------------------
+  // 6. Invalid Input Screening (Meaningless text / gibberish)
+  // -------------------------------------------------------------------------
+  process.stdout.write("6. Verifying meaningless input ('sdgsafdasafd') is rejected (HTTP 400)... ");
+  try {
+    const res = await request(`${BASE_URL}/api/requests`, {
+      method: "POST",
+      body: { action: "analyze", rawText: "sdgsafdasafd" }
+    });
+
+    if (res.status === 400 && res.body?.isInvalid && res.body?.error?.includes("real infrastructure")) {
+      console.log("PASS (Rejected with 'Please describe a real infrastructure or public-service problem.')");
+      passed++;
+    } else {
+      console.log("FAIL: Expected 400 rejection for gibberish, got:", res.status, res.body);
+      failed++;
+    }
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : "Error";
+    console.log(`FAIL: ${msg}`);
+    failed++;
+  }
+
+  // -------------------------------------------------------------------------
+  // 7. Demo Scope Boundary Guard (Outside district Goa / Anjuna)
+  // -------------------------------------------------------------------------
+  process.stdout.write("7. Verifying outside-scope district (Goa / Anjuna) is never converted to Ramanagara... ");
+  try {
+    const analyzeRes = await request(`${BASE_URL}/api/requests`, {
+      method: "POST",
+      body: {
+        action: "analyze",
+        rawText: "Road in Anjuna village has potholes and streetlights are broken.",
+        stateHint: "Goa",
+        districtHint: "Anjuna"
+      }
+    });
+
+    const ext = analyzeRes.body?.extraction;
+    const notRamanagara = ext?.district !== "Ramanagara" && ext?.isSupportedDistrict === false;
+
+    const submitRes = await request(`${BASE_URL}/api/requests`, {
+      method: "POST",
+      body: {
+        action: "submit",
+        requestData: {
+          raw_text: "Road in Anjuna village has potholes and streetlights are broken.",
+          category: "roads",
+          district: "Anjuna",
+          state: "Goa",
+          severity: "medium",
+          need_summary: "Road in Anjuna village has potholes."
+        }
+      }
+    });
+
+    const submitRejected = submitRes.status === 422;
+
+    if (notRamanagara && submitRejected) {
+      console.log("PASS (Not converted to Ramanagara, flagged as outside coverage, rejected on submit)");
+      passed++;
+    } else {
+      console.log("FAIL:", { notRamanagara, submitRejected, extDistrict: ext?.district });
       failed++;
     }
   } catch (err: unknown) {

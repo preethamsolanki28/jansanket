@@ -1,7 +1,7 @@
 /**
  * Validation rules and canonical references for JanSanket
- * Implements TASK-031: Strict schema and semantic validation per docs/02_architecture.md
- * Guarantees that invalid model output cannot silently reach the database.
+ * Implements strict schema, semantic, and demo coverage validation.
+ * Guarantees that invalid or out-of-scope model output cannot silently reach the database.
  */
 
 import { InfrastructureCategory, Severity } from "./demo-data";
@@ -49,6 +49,55 @@ export function isValidSource(source: unknown): source is RequestSource {
   return (ALLOWED_SOURCES as readonly string[]).includes(source.trim());
 }
 
+const DISTRICT_ALIASES: Record<string, { state: string; district: string }> = {
+  // Ramanagara
+  ramanagara: { state: "Karnataka", district: "Ramanagara" },
+  ramnagar: { state: "Karnataka", district: "Ramanagara" },
+  "ರಾಮನಗರ": { state: "Karnataka", district: "Ramanagara" },
+  "रामनगर": { state: "Karnataka", district: "Ramanagara" },
+
+  // Tumakuru
+  tumakuru: { state: "Karnataka", district: "Tumakuru" },
+  tumkur: { state: "Karnataka", district: "Tumakuru" },
+  "ತುಮಕೂರು": { state: "Karnataka", district: "Tumakuru" },
+  "तुमकुर": { state: "Karnataka", district: "Tumakuru" },
+
+  // Bahraich
+  bahraich: { state: "Uttar Pradesh", district: "Bahraich" },
+  "बहराइच": { state: "Uttar Pradesh", district: "Bahraich" },
+  "ಬಹ್ರೈಚ್": { state: "Uttar Pradesh", district: "Bahraich" },
+
+  // Varanasi
+  varanasi: { state: "Uttar Pradesh", district: "Varanasi" },
+  banaras: { state: "Uttar Pradesh", district: "Varanasi" },
+  kashi: { state: "Uttar Pradesh", district: "Varanasi" },
+  "वाराणसी": { state: "Uttar Pradesh", district: "Varanasi" },
+  "बनारस": { state: "Uttar Pradesh", district: "Varanasi" },
+  "ವಾರಣಾಸಿ": { state: "Uttar Pradesh", district: "Varanasi" },
+
+  // Barmer
+  barmer: { state: "Rajasthan", district: "Barmer" },
+  "बाड़मेर": { state: "Rajasthan", district: "Barmer" },
+  "ಬಾರ್ಮರ್": { state: "Rajasthan", district: "Barmer" },
+
+  // Dausa
+  dausa: { state: "Rajasthan", district: "Dausa" },
+  "दौसा": { state: "Rajasthan", district: "Dausa" },
+  "ದೌಸಾ": { state: "Rajasthan", district: "Dausa" },
+
+  // Dharmapuri
+  dharmapuri: { state: "Tamil Nadu", district: "Dharmapuri" },
+  "தருமபுரி": { state: "Tamil Nadu", district: "Dharmapuri" },
+  "धर्मपुरी": { state: "Tamil Nadu", district: "Dharmapuri" },
+  "ಧರ್ಮಪುರಿ": { state: "Tamil Nadu", district: "Dharmapuri" },
+
+  // Madurai
+  madurai: { state: "Tamil Nadu", district: "Madurai" },
+  "மதுரை": { state: "Tamil Nadu", district: "Madurai" },
+  "मदुरै": { state: "Tamil Nadu", district: "Madurai" },
+  "ಮಧುರೈ": { state: "Tamil Nadu", district: "Madurai" },
+};
+
 /**
  * Matches a district string against the canonical 8 pilot districts.
  * Returns state and canonical district name, or null if unrecognized.
@@ -56,6 +105,12 @@ export function isValidSource(source: unknown): source is RequestSource {
 export function findCanonicalDistrict(districtStr?: string | null): { state: string; district: string } | null {
   if (!districtStr || typeof districtStr !== "string") return null;
   const clean = districtStr.trim().toLowerCase();
+
+  for (const [alias, canonical] of Object.entries(DISTRICT_ALIASES)) {
+    if (clean === alias.toLowerCase() || clean.includes(alias.toLowerCase())) {
+      return canonical;
+    }
+  }
 
   for (const [state, districts] of Object.entries(SUPPORTED_STATES_AND_DISTRICTS)) {
     for (const d of districts) {
@@ -65,6 +120,116 @@ export function findCanonicalDistrict(districtStr?: string | null): { state: str
     }
   }
   return null;
+}
+
+export interface DistrictCoverageResult {
+  isSupported: boolean;
+  canonical: { state: string; district: string } | null;
+  rawDistrict?: string;
+  rawState?: string;
+  message?: string;
+}
+
+/**
+ * Validates whether a specified district falls within the 8 pilot districts.
+ * Never silently defaults or replaces an unsupported district.
+ */
+export function checkDistrictCoverage(districtStr?: string | null, stateStr?: string | null): DistrictCoverageResult {
+  if (!districtStr || typeof districtStr !== "string" || !districtStr.trim()) {
+    return {
+      isSupported: false,
+      canonical: null,
+      message: "No district specified."
+    };
+  }
+
+  const clean = districtStr.trim();
+  const canonical = findCanonicalDistrict(clean);
+
+  if (canonical) {
+    return {
+      isSupported: true,
+      canonical,
+      rawDistrict: clean,
+      rawState: stateStr?.trim()
+    };
+  }
+
+  return {
+    isSupported: false,
+    canonical: null,
+    rawDistrict: clean,
+    rawState: stateStr?.trim(),
+    message: `District "${clean}" is outside the current demo coverage (8 pilot districts). Please select a supported district.`
+  };
+}
+
+/**
+ * Detects obviously meaningless / invalid / gibberish text.
+ * Ensures random inputs such as "sdgsafdasafd" cannot be processed as valid requests.
+ */
+export function isMeaningfulRequest(text?: string | null): { isValid: boolean; reason?: string } {
+  const genericError = "Please describe a real infrastructure or public-service problem.";
+
+  if (!text || typeof text !== "string") {
+    return { isValid: false, reason: genericError };
+  }
+
+  const clean = text.trim();
+  if (clean.length < 5) {
+    return { isValid: false, reason: "Please describe a real infrastructure or public-service problem (at least 5 characters)." };
+  }
+
+  // 1. Single repeated character, e.g. "aaaaa", "11111", "......"
+  if (/^(.)\1+$/u.test(clean)) {
+    return { isValid: false, reason: genericError };
+  }
+
+  // 2. Obvious keyboard mashing or spam phrases
+  const mashRegex = /^(?:asdf|qwer|zxcv|1234|abcd|test|sdg|safd|fdsa)+$/i;
+  if (mashRegex.test(clean.replace(/\s+/g, ""))) {
+    return { isValid: false, reason: genericError };
+  }
+
+  // 3. Repeated short chunks, e.g. "abcabcabc", "xyzxyz"
+  if (/^(.{2,4})\1{2,}$/i.test(clean)) {
+    return { isValid: false, reason: genericError };
+  }
+
+  // 4. Token analysis
+  const words = clean.split(/\s+/).filter(Boolean);
+
+  // Single word inputs that are not clear, recognized civic terms
+  if (words.length === 1) {
+    const single = words[0].toLowerCase();
+    const allowedSingleTokens = [
+      "pothole", "potholes", "water", "electricity", "hospital",
+      "clinic", "school", "drainage", "garbage", "road", "roads",
+      "bridge", "streetlight", "pipeline"
+    ];
+    if (!allowedSingleTokens.includes(single)) {
+      return { isValid: false, reason: genericError };
+    }
+  }
+
+  // 5. Consonant cluster check for Latin characters (e.g. 5 or more consonants in a row)
+  if (/[bcdfghjklmnpqrstvwxyz]{5,}/i.test(clean)) {
+    return { isValid: false, reason: genericError };
+  }
+
+  // 6. Minimum alphabetic/character requirement
+  const letters = (clean.match(/[\p{L}]/gu) || []).length;
+  if (letters < 3) {
+    return { isValid: false, reason: genericError };
+  }
+
+  // 7. Check for common non-problem conversational words
+  const nonCivic = ["hello", "hi", "testing", "just testing", "check", "check 123", "good morning", "thanks"];
+  if (nonCivic.includes(clean.toLowerCase())) {
+    return { isValid: false, reason: genericError };
+  }
+
+  return { isValid: true };
 }
 
 export interface ValidatedCitizenRequest {
@@ -88,14 +253,14 @@ export interface ValidationResult {
 }
 
 /**
- * TASK-031: Pure semantic and schema validation function.
+ * Pure semantic and schema validation function.
  * Validates:
- * 1. Allowed category (roads, water, sanitation, healthcare, education, power, transport, other)
- * 2. Confidence range (0.0 to 1.0)
- * 3. Known pilot district and state
- * 4. Non-empty need summary (>= 3 chars)
- * 5. Severity enum (low, medium, high)
- * 6. Non-empty raw text (>= 5 chars)
+ * 1. Non-empty meaningful raw text (rejects gibberish like "sdgsafdasafd")
+ * 2. Allowed category (roads, water, sanitation, healthcare, education, power, transport, other)
+ * 3. Confidence range (0.0 to 1.0, or 0.0 for manual_fallback)
+ * 4. Known pilot district and state (strictly one of the 8 supported districts)
+ * 5. Non-empty need summary (>= 3 chars)
+ * 6. Severity enum (low, medium, high)
  * 7. Allowed source (text, voice, manual_fallback)
  */
 export function validateCitizenRequest(input: unknown): ValidationResult {
@@ -110,10 +275,11 @@ export function validateCitizenRequest(input: unknown): ValidationResult {
 
   const record = input as Record<string, unknown>;
 
-  // 1. Raw Text
+  // 1. Raw Text & Meaningfulness Check
   const rawText = typeof record.raw_text === "string" ? record.raw_text.trim() : "";
-  if (!rawText || rawText.length < 5) {
-    errors.push("Citizen request text must be at least 5 characters long.");
+  const meaningCheck = isMeaningfulRequest(rawText);
+  if (!meaningCheck.isValid) {
+    errors.push(meaningCheck.reason || "Please describe a real infrastructure or public-service problem.");
   }
 
   // 2. Source
@@ -145,15 +311,20 @@ export function validateCitizenRequest(input: unknown): ValidationResult {
   }
 
   // 5. AI Confidence
-  let aiConfidence = 0.9;
-  if (record.ai_confidence === undefined || record.ai_confidence === null) {
-    errors.push("AI confidence score is required.");
+  let aiConfidence = 0.0;
+  if (source === "manual_fallback") {
+    // For manual fallback, confidence is 0.00 (not an AI prediction)
+    aiConfidence = 0.0;
   } else {
-    const conf = Number(record.ai_confidence);
-    if (isNaN(conf) || !isFinite(conf) || conf < 0.0 || conf > 1.0) {
-      errors.push(`Confidence score (${record.ai_confidence}) must be a valid number between 0.0 and 1.0.`);
+    if (record.ai_confidence === undefined || record.ai_confidence === null) {
+      errors.push("AI confidence score is required for AI-extracted requests.");
     } else {
-      aiConfidence = Math.round(conf * 100) / 100;
+      const conf = Number(record.ai_confidence);
+      if (isNaN(conf) || !isFinite(conf) || conf < 0.0 || conf > 1.0) {
+        errors.push(`Confidence score (${record.ai_confidence}) must be a valid number between 0.0 and 1.0.`);
+      } else {
+        aiConfidence = Math.round(conf * 100) / 100;
+      }
     }
   }
 
@@ -165,13 +336,13 @@ export function validateCitizenRequest(input: unknown): ValidationResult {
     errors.push("Need summary must not exceed 500 characters.");
   }
 
-  // 7. Known Pilot District & State
+  // 7. Known Pilot District & State (Strictly 8 Supported Districts)
   const districtInput = typeof record.district === "string" ? record.district : "";
-  const canonical = findCanonicalDistrict(districtInput);
+  const coverage = checkDistrictCoverage(districtInput);
 
-  if (!canonical) {
+  if (!coverage.isSupported || !coverage.canonical) {
     errors.push(
-      `District "${districtInput}" is not recognized. Must be one of: ${ALL_SUPPORTED_DISTRICTS.map((d) => d.district).join(", ")}.`
+      `District "${districtInput}" is outside the current demo coverage. Must be one of: ${ALL_SUPPORTED_DISTRICTS.map((d) => d.district).join(", ")}.`
     );
   }
 
@@ -195,8 +366,8 @@ export function validateCitizenRequest(input: unknown): ValidationResult {
       source,
       raw_text: rawText,
       language_code: langCode,
-      state: canonical!.state,
-      district: canonical!.district,
+      state: coverage.canonical!.state,
+      district: coverage.canonical!.district,
       category,
       need_summary: needSummary,
       severity,

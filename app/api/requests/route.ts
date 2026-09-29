@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { normalizeRequestWithGemini } from "@/lib/gemini";
-import { validateCitizenRequest } from "@/lib/validation";
+import { validateCitizenRequest, isMeaningfulRequest } from "@/lib/validation";
 import { persistCitizenRequest } from "@/lib/db";
 
 export async function POST(req: NextRequest) {
@@ -8,16 +8,32 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
     const { action = "analyze", rawText, stateHint, districtHint, requestData, source } = body;
 
-    // 1. Analyze Action: Normalize unstructured citizen request via Gemini 3.8 Flash (TASK-030)
+    // 1. Analyze Action: Normalize unstructured citizen request via Gemini 3.8 Flash
     if (action === "analyze") {
-      if (!rawText || typeof rawText !== "string" || rawText.trim().length < 5) {
+      const meaning = isMeaningfulRequest(rawText);
+      if (!meaning.isValid) {
         return NextResponse.json(
-          { error: "Please enter a development request with at least 5 characters." },
+          {
+            success: false,
+            isInvalid: true,
+            error: meaning.reason || "Please describe a real infrastructure or public-service problem."
+          },
           { status: 400 }
         );
       }
 
       const extraction = await normalizeRequestWithGemini(rawText.trim(), stateHint, districtHint);
+
+      if (!extraction.isValidRequest) {
+        return NextResponse.json(
+          {
+            success: false,
+            isInvalid: true,
+            error: extraction.rejectionReason || "Please describe a real infrastructure or public-service problem."
+          },
+          { status: 400 }
+        );
+      }
 
       return NextResponse.json({
         success: true,
@@ -25,7 +41,7 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // 2. Submit Action: Validate (TASK-031) and Persist to Supabase / active store (TASK-032)
+    // 2. Submit Action: Validate and Persist
     if (action === "submit") {
       const dataToValidate = requestData || body;
 
@@ -37,8 +53,7 @@ export async function POST(req: NextRequest) {
         dataToValidate.source = source;
       }
 
-      // TASK-031: Strict schema & semantic validation
-      // Invalid model output cannot silently reach the database
+      // Strict schema, semantic & coverage validation
       const validation = validateCitizenRequest(dataToValidate);
 
       if (!validation.isValid || !validation.validated) {
@@ -51,8 +66,7 @@ export async function POST(req: NextRequest) {
         );
       }
 
-      // TASK-032: Persist validated request
-      // Browser never writes directly to database; server route owns persistence
+      // Persist validated request
       const { request: savedRecord, provider } = await persistCitizenRequest(validation.validated);
 
       return NextResponse.json({

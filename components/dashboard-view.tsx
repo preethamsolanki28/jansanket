@@ -120,7 +120,7 @@ export function DashboardView() {
     };
   }, [fetchLatestData]);
 
-  // Selected hotspot for "Why this hotspot?" deep dive
+  // Selected hotspot for "Why this area is highlighted" deep dive
   const selectedHotspot =
     data?.hotspots.find(
       (h) => `${h.state}:${h.district}:${h.category}` === selectedHotspotKey
@@ -170,6 +170,12 @@ export function DashboardView() {
             >
               demo_synthetic
             </Badge>
+            <Badge
+              variant="outline"
+              className="bg-slate-100 text-slate-700 border-slate-300 text-xs font-medium"
+            >
+              8 Pilot Districts
+            </Badge>
             {data?.meta && (
               <Badge
                 variant="outline"
@@ -181,7 +187,10 @@ export function DashboardView() {
             )}
           </div>
           <p className="text-sm text-muted-foreground mt-1">
-            Aggregated citizen development requests combined with baseline infrastructure deficit to compute transparent planning signals.
+            Aggregated citizen infrastructure demand combined with district infrastructure deficits to compute transparent priority signals.
+          </p>
+          <p className="text-xs text-muted-foreground/80 mt-0.5">
+            Current pilot covers 8 districts across Karnataka, Uttar Pradesh, Rajasthan, and Tamil Nadu. Baseline context metrics use calibrated demo data.
           </p>
         </div>
 
@@ -221,14 +230,14 @@ export function DashboardView() {
         </div>
       )}
 
-      {/* TASK-040: 3 KPI Cards */}
+      {/* BUG 7: Plain-Language KPI Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        {/* Total Citizen Requests */}
+        {/* Total Citizen Requests -> Citizen Demand */}
         <Card className="bg-white border-border shadow-xs hover:border-slate-300 transition-colors">
           <CardHeader className="pb-2">
             <div className="flex items-center justify-between text-muted-foreground">
               <CardDescription className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                Total Citizen Requests
+                Citizen Demand
               </CardDescription>
               <FileText className="h-4 w-4 text-primary" />
             </div>
@@ -238,17 +247,17 @@ export function DashboardView() {
           </CardHeader>
           <CardContent>
             <p className="text-xs text-muted-foreground">
-              Direct citizen voices across 4 supported languages
+              Total citizen requests recorded across 4 supported languages
             </p>
           </CardContent>
         </Card>
 
-        {/* Districts Covered */}
+        {/* Districts Covered -> Districts Monitored */}
         <Card className="bg-white border-border shadow-xs hover:border-slate-300 transition-colors">
           <CardHeader className="pb-2">
             <div className="flex items-center justify-between text-muted-foreground">
               <CardDescription className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                Districts Covered
+                Districts Monitored
               </CardDescription>
               <MapPin className="h-4 w-4 text-emerald-600" />
             </div>
@@ -258,17 +267,17 @@ export function DashboardView() {
           </CardHeader>
           <CardContent>
             <p className="text-xs text-muted-foreground">
-              Active pilot districts across 4 Indian states
+              8 pilot districts across 4 Indian states
             </p>
           </CardContent>
         </Card>
 
-        {/* Active Hotspots */}
+        {/* Active Hotspots -> High-Need Areas */}
         <Card className="bg-white border-border shadow-xs hover:border-slate-300 transition-colors">
           <CardHeader className="pb-2">
             <div className="flex items-center justify-between text-muted-foreground">
               <CardDescription className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                Active Hotspots
+                High-Need Areas
               </CardDescription>
               <TrendingUp className="h-4 w-4 text-rose-600" />
             </div>
@@ -278,15 +287,15 @@ export function DashboardView() {
           </CardHeader>
           <CardContent>
             <p className="text-xs text-muted-foreground">
-              District-category combinations requiring planning focus
+              District and sector combinations requiring urgent planning focus
             </p>
           </CardContent>
         </Card>
       </div>
 
-      {/* Main Content Layout: Hotspot Table + Why this Hotspot? Detail */}
+      {/* Main Content Layout: Hotspot Table + Why this Area is Highlighted Detail */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-        {/* TASK-041: Hotspot View (Hotspot Table) */}
+        {/* Hotspot Table */}
         <div className="lg:col-span-7 space-y-3">
           <Card className="bg-white border-border shadow-xs">
             <CardHeader className="pb-3 border-b border-border">
@@ -324,8 +333,8 @@ export function DashboardView() {
                       <TableHead className="w-12 text-center">#</TableHead>
                       <TableHead>Location</TableHead>
                       <TableHead>Category</TableHead>
-                      <TableHead className="text-right">Demands</TableHead>
-                      <TableHead className="text-right">Priority</TableHead>
+                      <TableHead className="text-right">Citizen Demand</TableHead>
+                      <TableHead className="text-right">Priority Score</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -340,7 +349,7 @@ export function DashboardView() {
                             isSelected
                               ? "bg-blue-50/70 border-l-4 border-l-primary font-medium"
                               : "hover:bg-slate-50/60"
-                          } transition-colors`}
+                          } transition-colors cursor-pointer`}
                         >
                           <TableCell className="text-center font-bold text-xs text-muted-foreground">
                             #{index + 1}
@@ -361,7 +370,7 @@ export function DashboardView() {
                             </span>
                           </TableCell>
                           <TableCell className="text-right font-medium text-foreground text-sm">
-                            {h.request_count}
+                            {h.request_count} reqs
                           </TableCell>
                           <TableCell className="text-right">
                             <span
@@ -382,7 +391,7 @@ export function DashboardView() {
           </Card>
         </div>
 
-        {/* TASK-042: Why this hotspot? Detail Panel */}
+        {/* Why this area is highlighted Detail Panel (BUG 7 Plain Language) */}
         <div className="lg:col-span-5 space-y-4">
           {selectedHotspot ? (
             <Card className="bg-white border-border shadow-xs border-t-4 border-t-primary">
@@ -390,7 +399,7 @@ export function DashboardView() {
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-bold uppercase tracking-wider text-primary flex items-center gap-1.5">
                     <TrendingUp className="h-3.5 w-3.5" />
-                    Hotspot Evidence Breakdown
+                    Why this area is highlighted
                   </span>
                   <Badge
                     variant="outline"
@@ -420,28 +429,28 @@ export function DashboardView() {
                 {/* Recommended Project from Deterministic Mapping */}
                 <div className="p-3.5 rounded-lg bg-slate-50 border border-slate-200">
                   <div className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-                    Deterministic Project Recommendation
+                    Recommended Project
                   </div>
                   <div className="text-base font-bold text-foreground mt-0.5 flex items-center gap-2">
                     <Building2 className="h-4 w-4 text-primary shrink-0" />
                     <span>{selectedHotspot.recommended_project}</span>
                   </div>
                   <p className="text-xs text-muted-foreground mt-1 leading-snug">
-                    Standard project intervention mapped deterministically from validated citizen sector demand.
+                    Standard public project mapped deterministically from validated citizen sector demand.
                   </p>
                 </div>
 
-                {/* 6 Metric Breakdown Indicators */}
+                {/* 4 Metric Breakdown Indicators (Plain Language) */}
                 <div className="space-y-2.5">
                   <div className="text-xs font-bold text-foreground uppercase tracking-wider">
                     Score Components
                   </div>
 
                   <div className="grid grid-cols-2 gap-2.5">
-                    {/* Demand Score (40%) */}
+                    {/* Citizen Demand (40%) */}
                     <div className="p-2.5 rounded-md border border-border bg-white shadow-2xs">
                       <div className="text-[11px] text-muted-foreground font-medium">
-                        Demand Score (40%)
+                        Citizen Demand (40%)
                       </div>
                       <div className="text-lg font-bold text-foreground mt-0.5">
                         {selectedHotspot.demand_score.toFixed(1)}
@@ -452,10 +461,10 @@ export function DashboardView() {
                       </div>
                     </div>
 
-                    {/* Infrastructure Gap (30%) */}
+                    {/* Infrastructure Need (30%) */}
                     <div className="p-2.5 rounded-md border border-border bg-white shadow-2xs">
                       <div className="text-[11px] text-muted-foreground font-medium">
-                        Infrastructure Gap (30%)
+                        Infrastructure Need (30%)
                       </div>
                       <div className="text-lg font-bold text-foreground mt-0.5">
                         {selectedHotspot.infrastructure_gap_index.toFixed(1)}
@@ -466,31 +475,31 @@ export function DashboardView() {
                       </div>
                     </div>
 
-                    {/* Population Impact (15%) */}
+                    {/* People Affected (15%) */}
                     <div className="p-2.5 rounded-md border border-border bg-white shadow-2xs">
                       <div className="text-[11px] text-muted-foreground font-medium">
-                        Pop. Impact (15%)
+                        People Affected (15%)
                       </div>
                       <div className="text-lg font-bold text-foreground mt-0.5">
                         {selectedHotspot.population_impact_score.toFixed(1)}
                         <span className="text-xs text-muted-foreground font-normal"> / 100</span>
                       </div>
                       <div className="text-[10px] text-muted-foreground mt-0.5">
-                        Vulnerability multiplier
+                        Scale &amp; vulnerability proxy
                       </div>
                     </div>
 
-                    {/* Unaddressed Gap (15%) */}
+                    {/* Unaddressed Need (15%) */}
                     <div className="p-2.5 rounded-md border border-border bg-white shadow-2xs">
                       <div className="text-[11px] text-muted-foreground font-medium">
-                        Unaddressed Gap (15%)
+                        Unaddressed Need (15%)
                       </div>
                       <div className="text-lg font-bold text-foreground mt-0.5">
                         {selectedHotspot.unaddressed_gap.toFixed(1)}
                         <span className="text-xs text-muted-foreground font-normal"> / 100</span>
                       </div>
                       <div className="text-[10px] text-muted-foreground mt-0.5">
-                        Coverage: {selectedHotspot.planned_coverage_pct.toFixed(0)}%
+                        Current Coverage: {selectedHotspot.planned_coverage_pct.toFixed(0)}%
                       </div>
                     </div>
                   </div>
@@ -539,7 +548,7 @@ export function DashboardView() {
         </div>
       </div>
 
-      {/* Signal Calculation Explainer Block */}
+      {/* Signal Calculation Explainer Block (Plain Language) */}
       <Card className="bg-slate-50/80 border-border">
         <CardHeader className="pb-2">
           <CardTitle className="text-sm font-semibold text-foreground flex items-center gap-1.5">
@@ -549,16 +558,19 @@ export function DashboardView() {
         </CardHeader>
         <CardContent className="text-xs text-muted-foreground space-y-1.5 leading-relaxed">
           <p>
-            <strong>Demand Score:</strong> Normalized citizen development requests per 100,000 population: <code className="font-mono bg-white px-1 py-0.5 rounded border">min(100, (requests / pop) * 100000 * 5)</code>.
+            <strong>Citizen Demand:</strong> Normalized citizen development requests per 100,000 population: <code className="font-mono bg-white px-1 py-0.5 rounded border">min(100, (requests / pop) * 100000 * 5)</code>.
           </p>
           <p>
-            <strong>Infrastructure Gap:</strong> Baseline deficit indicator for the specific district and infrastructure category (0–100).
+            <strong>Infrastructure Need:</strong> Baseline deficit indicator for the specific district and infrastructure category (0–100).
           </p>
           <p>
-            <strong>Unaddressed Gap:</strong> Baseline gap weighted by uncommitted planned investment: <code className="font-mono bg-white px-1 py-0.5 rounded border">gap * (1 - planned_coverage / 100)</code>.
+            <strong>Current Coverage:</strong> Proportion of existing planned schemes already addressing this sector.
           </p>
           <p>
-            <strong>Priority Score:</strong> 40% Demand + 30% Infrastructure Gap + 15% Population Impact + 15% Unaddressed Gap. AI extracts the unstructured request; pure deterministic application code computes the planning signal.
+            <strong>Unaddressed Need:</strong> Baseline deficit weighted by uncommitted planned investment: <code className="font-mono bg-white px-1 py-0.5 rounded border">need * (1 - current_coverage / 100)</code>.
+          </p>
+          <p>
+            <strong>Priority Score:</strong> 40% Citizen Demand + 30% Infrastructure Need + 15% People Affected + 15% Unaddressed Need. Gemini translates and structures citizen language; deterministic application code computes the planning score.
           </p>
         </CardContent>
       </Card>

@@ -2,153 +2,201 @@
 
 ## Stack
 
-| Layer | Choice | MVP use |
+| Layer | Choice | Implemented MVP Use |
 |---|---|---|
-| Web app | Next.js App Router + TypeScript | UI, server routes, deployment in one codebase. |
-| UI | shadcn/ui + Tailwind CSS | Fast, consistent UI without a custom design system. |
-| Database | Supabase Postgres | Requests and district/category context. |
-| Authentication | Supabase Auth | Fixed-stack capability, **not implemented in MVP**. |
-| File storage | Supabase Storage | Fixed-stack capability, **not used for raw audio in MVP**. |
-| Vectors | Supabase pgvector | Fixed-stack capability, **not used in MVP**. |
-| AI | Gemini API via `@google/genai` | Required Google AI integration for text/audio normalization and structured output. |
-| Deployment | Vercel | Next.js deployment. |
-| Backend | Next.js Route Handlers | Avoids a second Python deployment because no Python-specific workload is required. |
-| Python/FastAPI | None | Only reconsider if a proven blocker appears. |
+| Web app | Next.js 16 (App Router) + TypeScript 5 | UI, server routes, static optimization in one codebase. |
+| UI | shadcn/ui + Tailwind CSS v4 | Civic design tokens, accessible components (`Button`, `Card`, `Badge`, `Textarea`, `Select`, `Alert`, `Table`). |
+| Database | Supabase Postgres | Schema for `citizen_requests` and `district_context` with PostgREST server integration. |
+| Fallback Store | Active In-Memory / Seed Store | Seamless fallback for local demonstration when Supabase is offline or unconfigured (`DEMO_MODE=true`). |
+| AI Normalization | Google Gemini API (`gemini-3.8-flash`) | Server-side REST API integration for structured JSON extraction from multilingual text. |
+| Deployment | Vercel | Production Next.js serverless deployment. |
+| Backend | Next.js Route Handlers | Serverless API routes (`/api/requests`, `/api/dashboard`); avoids Python/FastAPI complexity. |
+| Voice | Cut during viability test | Evaluated in TASK-003 and cut due to mobile latency/permissions; text is the guaranteed path. |
+| Authentication | Excluded from MVP | Fixed-stack capability, not required for hackathon MVP judging. |
+| pgvector / Embeddings | Excluded from MVP | Fixed-stack capability, not required for demand aggregation. |
 
-The MVP uses the fixed stack without adding libraries. The key simplification is **not using every Supabase capability** just because it is available.
+The MVP uses the fixed stack without adding unnecessary external libraries. The key simplification is **not using every Supabase or cloud capability** just because it exists.
 
-## System/component/data-flow diagram
+---
+
+## System Component & Data-Flow Diagram
 
 ```mermaid
 flowchart TD
-    C[Citizen] --> UI[Next.js Submit UI]
-    UI --> TXT[Text Input]
-    UI --> VOICE[Optional Browser MediaRecorder]
-    TXT --> API[Next.js Route Handler]
-    VOICE --> API
-    API --> G[Gemini API]
-    G --> VAL[Schema + business validation]
-    VAL -->|valid| DB[(Supabase Postgres)]
-    VAL -->|invalid / unavailable| FB[Fallback path]
-    DB --> AGG[Deterministic aggregation + priority formula]
-    AGG --> DASH[Planner Dashboard]
-    DEMO[Bundled demo fixtures] --> DEMOFLAG{DEMO_MODE?}
-    DEMOFLAG -->|yes| DASH
-    DEMOFLAG -->|no| DB
-    FB --> DASH
+    subgraph Browser ["Client Browser (/submit & /dashboard)"]
+        CITIZEN[Citizen Intake UI<br/>/submit]
+        DASH[Planner Dashboard UI<br/>/dashboard]
+    end
+
+    subgraph ServerRoutes ["Next.js Server Runtime"]
+        API_REQ[POST /api/requests]
+        API_DASH[GET /api/dashboard]
+    end
+
+    subgraph InputScreening ["Defensive Input Screening"]
+        SCREEN{isMeaningfulRequest?<br/>lib/validation.ts}
+        REJECT[HTTP 400 Rejection<br/>'Please describe a real problem']
+    end
+
+    subgraph ProcessingCore ["Application Logic & AI Paths"]
+        GEMINI[Gemini 3.8 Flash<br/>Google Generative AI]
+        FALLBACK[Manual Fallback Engine<br/>lib/gemini.ts]
+        VAL[Strict Schema & Coverage Validation<br/>lib/validation.ts]
+        DB_LAYER[Persistence Layer<br/>lib/db.ts]
+        PRIORITY[Deterministic Priority Engine<br/>lib/priority.ts]
+    end
+
+    subgraph ThreeStates ["3 Distinct Intake States"]
+        S1["<b>1. VALID AI RESULT</b><br/>Gemini extracted, AI confidence shown,<br/>English translation verified"]
+        S2["<b>2. VALID MANUAL FALLBACK</b><br/>HTTP 429 quota fallback, zero fake confidence,<br/>user explicitly confirms fields"]
+        S3["<b>3. INVALID REQUEST</b><br/>Gibberish rejected, zero confidence,<br/>no district assigned, no save allowed"]
+    end
+
+    subgraph DataStorage ["Data Storage & Fallback"]
+        SUPABASE[(Supabase Postgres<br/>citizen_requests & district_context)]
+        DEMO_STORE[(Active Demo Store<br/>lib/demo-data.ts)]
+    end
+
+    CITIZEN -->|1. Raw Text + Pilot Hints| API_REQ
+    API_REQ --> SCREEN
+    SCREEN -->|Meaningless / Gibberish| REJECT --> S3
+    SCREEN -->|Valid Citizen Problem| GEMINI
+
+    GEMINI -->|Success: Structured JSON| S1 --> VAL
+    GEMINI -.->|Quota Exceeded / HTTP 429| FALLBACK --> S2 --> VAL
+    
+    VAL -->|4. Validated Fields Preview| CITIZEN
+    CITIZEN -->|5. Confirm & Submit Request| API_REQ
+    API_REQ -->|6. Re-validate Server-Side| VAL
+    VAL -->|7. Validated Record| DB_LAYER
+    DB_LAYER -->|PostgREST Insert| SUPABASE
+    DB_LAYER -.->|DEMO_MODE / Offline| DEMO_STORE
+
+    DASH -->|Fetch Signals| API_DASH
+    API_DASH --> DB_LAYER
+    DB_LAYER -->|Read Requests & Context| SUPABASE
+    DB_LAYER -.->|DEMO_MODE / Offline| DEMO_STORE
+    DB_LAYER --> PRIORITY
+    PRIORITY -->|8. Ranked Hotspots + Plain-Language Breakdown| API_DASH
+    API_DASH -->|9. Render Live Dashboard| DASH
 ```
 
-## Folder structure
+---
+
+## Folder Structure
 
 ```text
-/
+code-for-communities/
 ├── app/
-│   ├── page.tsx
-│   ├── dashboard/page.tsx
-│   ├── submit/page.tsx
+│   ├── page.tsx                     # Redirects to /dashboard
+│   ├── layout.tsx                   # Root layout with Inter font & navigation
+│   ├── globals.css                  # Tailwind CSS v4 & civic design tokens
+│   ├── dashboard/
+│   │   └── page.tsx                 # Planner Dashboard page entry
+│   ├── submit/
+│   │   └── page.tsx                 # Citizen Intake page entry
 │   └── api/
-│       ├── requests/route.ts
-│       ├── requests/voice/route.ts      # optional if voice survives test
-│       └── dashboard/route.ts
+│       ├── requests/
+│       │   └── route.ts             # POST: analyze (Gemini) & submit (persistence)
+│       └── dashboard/
+│           └── route.ts             # GET: aggregated planning signals & KPIs
 ├── components/
-│   ├── request-form.tsx
-│   ├── voice-recorder.tsx               # optional if voice survives test
-│   ├── priority-card.tsx
-│   ├── hotspot-table.tsx
-│   └── navigation.tsx
+│   ├── dashboard-view.tsx           # Interactive dashboard, KPI cards & detail panel
+│   ├── request-form.tsx             # Multilingual form with quick-fill presets
+│   ├── navigation.tsx               # Top header with demo_synthetic badge
+│   └── ui/                          # shadcn primitives (button, card, table, etc.)
 ├── lib/
-│   ├── gemini.ts
-│   ├── priority.ts
-│   ├── validation.ts
-│   ├── demo-data.ts
-│   └── supabase/
-│       ├── client.ts
-│       └── server.ts
+│   ├── gemini.ts                    # Server-side Gemini client + 429/503 fallback
+│   ├── validation.ts                # Strict schema & semantic validation rules
+│   ├── priority.ts                  # Deterministic priority formula & project mapping
+│   ├── db.ts                        # Supabase PostgREST client & demo store fallback
+│   ├── demo-data.ts                 # 48 district context rows & 52 citizen requests
+│   └── utils.ts                     # Class name helper (cn)
+├── scripts/
+│   ├── smoke-test.ts                # End-to-end production smoke test
+│   ├── test-m3-pipeline.ts          # M3 verification suite
+│   ├── test-m4-dashboard.ts         # M4 dashboard verification suite
+│   ├── test-m2-intake.mjs           # M2 intake test suite
+│   └── verify-m1-data.mjs           # M1 data integrity checks
 ├── supabase/
-│   └── migrations/
+│   ├── migrations/                  # Schema, RLS policies, and seed migrations
+│   │   ├── 20260929000001_create_schema.sql
+│   │   ├── 20260929000002_seed_district_context.sql
+│   │   └── 20260929000003_seed_citizen_requests.sql
+│   └── seed.sql                     # Combined seed migration
 ├── public/
 └── docs/
 ```
 
-## Architecture rules
+---
 
-1. **Gemini is server-side only.** Never expose `GEMINI_API_KEY` to the browser.
-2. **AI interprets; deterministic code calculates.** Gemini must not decide the priority score or budget.
-3. **No unnecessary PII.** Store only the data needed to demonstrate planning intelligence.
-4. **Raw voice is transient.** Do not persist the uploaded audio in the MVP.
-5. **Validate every AI field.** Schema-valid JSON is necessary but not sufficient.
-6. **Use one canonical district reference.** The valid district/state combinations come from the seeded `district_context` rows.
-7. **Demo data is explicitly labelled.** Synthetic values must never be presented as official statistics.
-8. **No live government API is on the critical path.** A public source failure must not kill the demo.
-9. **Dashboard must work before any new request is submitted.** Seed fixtures guarantee this.
-10. **Browser does not write directly to Supabase.** Next.js server routes own persistence.
-11. **Service-role keys, if used, stay server-side.** Prefer the least-privileged server connection that works.
-12. **Do not store chain-of-thought.** Store only concise rationale/evidence fields intended for users.
-13. **Demo mode must use the same dashboard components.** It is a fallback data source, not a separate fake UI.
+## Architecture Rules & Security
 
-## Data model
+1. **Gemini is server-side only:** Never expose `GEMINI_API_KEY` to the browser.
+2. **AI interprets; deterministic code calculates:** Gemini must never decide the priority score, budget, or project approval.
+3. **No unnecessary PII:** Zero Aadhaar numbers, phone numbers, personal names, or exact home addresses are stored.
+4. **Server-side validation mandatory:** Client-side validation is for UX; `validateCitizenRequest()` enforces schema and semantic constraints on all incoming requests.
+5. **One canonical district reference:** Valid district/state combinations are constrained to the 8 pilot districts (`Ramanagara`, `Tumakuru`, `Bahraich`, `Varanasi`, `Barmer`, `Dausa`, `Dharmapuri`, `Madurai`).
+6. **Explicit data labeling:** Baseline metrics are explicitly tagged `demo_synthetic`.
+7. **No live government API on critical path:** A public source failure cannot break the evaluation.
+8. **Browser does not write directly to Supabase:** Next.js server routes own database persistence.
+9. **DEMO_MODE resilience:** If Supabase is unconfigured or unreachable, the application uses bundled fixtures seamlessly.
 
-### `citizen_requests`
+---
 
-| Field | Type | Notes |
+## Data Model
+
+### Table 1: `citizen_requests`
+
+| Field | Type | Description |
+|---|---|---|
+| `id` | uuid | Primary key (UUID v4). |
+| `source` | text | `text` or `manual_fallback` (voice cut). |
+| `raw_text` | text | Original citizen request text. |
+| `language_code` | text | ISO short code (`en`, `hi`, `kn`, `ta`). |
+| `state` | text | Normalized Indian State. |
+| `district` | text | Normalized Indian District. |
+| `category` | text | Controlled enum: `roads`, `water`, `sanitation`, `healthcare`, `education`, `power`, `transport`, `other`. |
+| `need_summary` | text | Concise one-sentence need summary in English. |
+| `severity` | text | Controlled enum: `low`, `medium`, `high`. |
+| `ai_confidence` | numeric | Model confidence score between 0.00 and 1.00. |
+| `created_at` | timestamptz | Timestamp of record creation. |
+
+### Table 2: `district_context`
+
+Keyed strictly by **state + district + category** (unique composite constraint).
+
+| Field | Type | Description |
 |---|---|---|
 | `id` | uuid | Primary key. |
-| `source` | text | `text`, `voice`, or `manual_fallback`. |
-| `raw_text` | text | Original user text or Gemini transcript. |
-| `language_code` | text | ISO-like short code such as `en`, `hi`, `kn`, `ta`. |
-| `state` | text | Normalized state/UT. |
-| `district` | text | Normalized district. |
-| `category` | text | `roads`, `water`, `sanitation`, `healthcare`, `education`, `power`, `transport`, `other`. |
-| `need_summary` | text | One-sentence normalized need. |
-| `severity` | text | `low`, `medium`, or `high`. |
-| `ai_confidence` | numeric | 0–1. |
-| `created_at` | timestamptz | Submission timestamp. |
+| `state` | text | State/UT name. |
+| `district` | text | District name. |
+| `category` | text | Matching infrastructure category. |
+| `population` | integer | Demographic population proxy. |
+| `infrastructure_gap_index` | numeric | 0–100 baseline deficit index (higher = greater gap). |
+| `planned_coverage_pct` | numeric | 0–100 committed planned investment coverage proxy. |
+| `population_impact_score` | numeric | 0–100 vulnerability/impact proxy. |
+| `source_status` | text | Explicitly `demo_synthetic`. |
+| `source_url` | text | Reference public source (e.g. data.gov.in, indiainvestmentgrid.gov.in). |
+| `updated_at` | timestamptz | Timestamp. |
 
-### `district_context`
+---
 
-Each row is a **state + district + category** context record. This avoids comparing, for example, road demand with generic district-wide infrastructure data.
+## Priority Formula & Deterministic Mapping
 
-| Field | Type | Notes |
-|---|---|---|
-| `id` | uuid | Primary key. |
-| `state` | text | State/UT. |
-| `district` | text | District. |
-| `category` | text | Same controlled category set as `citizen_requests`. |
-| `population` | integer | Synthetic demo population proxy. |
-| `infrastructure_gap_index` | numeric | 0–100; higher means larger demo gap. |
-| `planned_coverage_pct` | numeric | 0–100; **demo investment-coverage proxy**. |
-| `population_impact_score` | numeric | 0–100 demo-normalized impact proxy. |
-| `source_status` | text | `demo_synthetic`. |
-| `source_url` | text | Public source family/reference URL. |
-| `updated_at` | timestamptz | Context timestamp. |
-
-**No `profiles` table and no `embedding vector(...)` column are required for the MVP.**
-
-## Priority formula
-
+### Mathematical Formula
 For each state/district/category combination:
 
-```text
-requests_per_100k =
-    (request_count / population) * 100000
+$$\text{requests\_per\_100k} = \left(\frac{\text{request\_count}}{\text{population}}\right) \times 100000$$
 
- demand_score =
-    min(100, requests_per_100k * 5)
+$$\text{demand\_score} = \min(100, \text{requests\_per\_100k} \times 5)$$
 
-unaddressed_gap =
-    infrastructure_gap_index *
-    (1 - planned_coverage_pct / 100)
+$$\text{unaddressed\_gap} = \text{infrastructure\_gap\_index} \times \left(1 - \frac{\text{planned\_coverage\_pct}}{100}\right)$$
 
-priority_score =
-    0.40 * demand_score
-  + 0.30 * infrastructure_gap_index
-  + 0.15 * population_impact_score
-  + 0.15 * unaddressed_gap
-```
+$$\text{priority\_score} = 0.40 \times \text{demand\_score} + 0.30 \times \text{infrastructure\_gap\_index} + 0.15 \times \text{population\_impact\_score} + 0.15 \times \text{unaddressed\_gap}$$
 
-The coefficients are **demo policy weights**, not an objective measure of public value. In production they would require domain review and governance.
-
-The project recommendation is **not generated by a second AI call**. It is a deterministic category mapping:
+### Deterministic Project Recommendations
+The project recommendation is **not generated by an AI call**. It is a pure category mapping:
 
 ```text
 roads      -> Rural road rehabilitation
@@ -161,205 +209,153 @@ transport  -> Local public-transport access upgrade
 other      -> Further planning review required
 ```
 
-## API endpoints
+---
 
-### `POST /api/requests`
+## API Endpoints
 
-**Input**
+### 1. `POST /api/requests`
 
+#### Action A: Analyze Unstructured Request
 ```json
 {
-  "source": "text",
-  "rawText": "The road connecting our village to the main road becomes unusable during monsoon.",
+  "action": "analyze",
+  "rawText": "In Ramanagara, the road connecting our village to the main highway is washed out every monsoon.",
   "stateHint": "Karnataka",
   "districtHint": "Ramanagara"
 }
 ```
-
-**Output**
-
+**Response on Valid AI Extraction (HTTP 200):**
 ```json
 {
-  "request": {
-    "id": "uuid",
-    "language_code": "en",
+  "success": true,
+  "extraction": {
+    "isValidRequest": true,
+    "source": "gemini",
+    "language": "en",
+    "originalText": "In Ramanagara, the road connecting our village to the main highway is washed out every monsoon.",
     "state": "Karnataka",
     "district": "Ramanagara",
     "category": "roads",
-    "need_summary": "Improve the village-to-main-road connection for monsoon access.",
+    "need_summary": "Rebuild village connecting road damaged during monsoon.",
     "severity": "high",
-    "ai_confidence": 0.94
+    "confidence": 0.95,
+    "isFallback": false,
+    "isSupportedDistrict": true,
+    "unsupportedDistrictName": null
   }
 }
 ```
 
-### `POST /api/requests/voice`
+**Response on Meaningless / Gibberish Input (HTTP 400):**
+```json
+{
+  "success": false,
+  "isInvalid": true,
+  "error": "Please describe a real infrastructure or public-service problem."
+}
+```
 
-**Input:** multipart `audio` with a short supported recording, plus optional state/district hints.
+**Response on Manual Fallback / HTTP 429 Quota Limit (HTTP 200):**
+```json
+{
+  "success": true,
+  "extraction": {
+    "isValidRequest": true,
+    "source": "manual_fallback",
+    "language": "kn",
+    "originalText": "ಮಳೆ ಬಂದಾಗ ನಮ್ಮ ಗ್ರಾಮದ ರಸ್ತೆ ಬಳಸಲು ಸಾಧ್ಯವಾಗುವುದಿಲ್ಲ, ರಾಮನಗರ ಜಿಲ್ಲೆಯ ಶಾಲೆಗೆ ಹೋಗಲು ಕಷ್ಟವಾಗುತ್ತಿದೆ.",
+    "state": "Karnataka",
+    "district": "Ramanagara",
+    "category": "roads",
+    "need_summary": "Citizen reported village road access, damage, or connectivity issues.",
+    "severity": "medium",
+    "confidence": null,
+    "isFallback": true,
+    "fallbackReason": "AI analysis is temporarily unavailable (API quota limit reached). You can continue using the manual fallback.",
+    "isSupportedDistrict": true,
+    "unsupportedDistrictName": null
+  }
+}
+```
 
-**Output:** normalized request schema plus transcript.
+#### Action B: Submit Validated Request
+```json
+{
+  "action": "submit",
+  "source": "text",
+  "requestData": {
+    "raw_text": "In Ramanagara, the road connecting our village to the main highway is washed out every monsoon.",
+    "language_code": "en",
+    "state": "Karnataka",
+    "district": "Ramanagara",
+    "category": "roads",
+    "need_summary": "Rebuild village connecting road damaged during monsoon.",
+    "severity": "high",
+    "ai_confidence": 0.95
+  }
+}
+```
+**Response (HTTP 200 on valid, HTTP 422 on validation failure):**
+```json
+{
+  "success": true,
+  "request": {
+    "id": "3aa7c3b2-8eda-4f6e-b7e2-e18f9cb02f18",
+    "source": "text",
+    "raw_text": "In Ramanagara, the road connecting our village to the main highway is washed out every monsoon.",
+    "language_code": "en",
+    "state": "Karnataka",
+    "district": "Ramanagara",
+    "category": "roads",
+    "need_summary": "Rebuild village connecting road damaged during monsoon.",
+    "severity": "high",
+    "ai_confidence": 0.95,
+    "created_at": "2026-09-29T03:32:26.263Z"
+  },
+  "provider": "supabase"
+}
+```
 
-This endpoint is optional. It is created only if the viability test succeeds.
+---
 
-### `GET /api/dashboard`
+### 2. `GET /api/dashboard`
 
-**Input:** optional `state` and `category` query parameters are allowed by the route contract, but filters are not an MVP UI requirement.
-
-**Output**
-
+**Response (HTTP 200):**
 ```json
 {
   "summary": {
-    "total_requests": 50,
+    "total_requests": 52,
     "districts": 8,
-    "hotspots": 4
+    "hotspots": 14
   },
   "hotspots": [
     {
       "state": "Karnataka",
       "district": "Ramanagara",
       "category": "roads",
-      "request_count": 9,
-      "demand_score": 81,
-      "infrastructure_gap_index": 72,
-      "population_impact_score": 65,
-      "planned_coverage_pct": 25,
-      "unaddressed_gap": 54,
-      "priority_score": 73.8,
+      "request_count": 10,
+      "demand_score": 90.9,
+      "infrastructure_gap_index": 78,
+      "population_impact_score": 72,
+      "planned_coverage_pct": 22,
+      "unaddressed_gap": 60.8,
+      "priority_score": 79.7,
       "recommended_project": "Rural road rehabilitation",
       "source_status": "demo_synthetic"
     }
-  ]
+  ],
+  "meta": {
+    "provider": "supabase",
+    "is_database_online": true,
+    "updated_at": "2026-09-29T03:30:00.000Z"
+  }
 }
 ```
 
-### `GET /api/health`
+---
 
-**Output:** `{ "ok": true }` with safe dependency status only. Never expose secrets or stack traces.
+## Defensive Fallback Hierarchy
 
-## AI pipeline: input → prompt → model → output validation → fallback
-
-### Text
-
-`raw text + optional hints`
-→ Gemini structured extraction
-→ `gemini-3.8-flash`
-→ schema validation
-→ semantic validation against known district/category values
-→ normalized request
-→ Postgres persistence
-
-Gemini 3.8 Flash is the configured model for the MVP. Verify the current Gemini model documentation before deployment if the model identifier or capabilities change.
-
-### Voice
-
-`browser-supported short recording`
-→ MIME/size/duration guard
-→ Gemini audio understanding
-→ structured response containing transcript + fields
-→ validation
-→ persistence
-
-### Prompt contract
-
-The model is instructed to:
-
-- extract rather than invent;
-- return only the required schema;
-- map to one allowed infrastructure category;
-- identify language;
-- normalize state/district names;
-- return uncertainty instead of inventing a location;
-- produce a concise need summary;
-- never decide budget, approval, or public-spending allocation.
-
-### Validation
-
-Reject or route to fallback when:
-
-- JSON is invalid;
-- category is outside the allow-list;
-- confidence is outside 0–1;
-- district/state combination is unknown;
-- required strings are empty;
-- model response is otherwise unusable.
-
-### Fallback hierarchy
-
-1. **AI unavailable but app available:** let the user use a minimal manual category + district path if already implemented; otherwise show the prepared text request and continue the demo.
-2. **Voice unavailable:** switch to text.
-3. **Supabase unavailable:** dashboard switches to bundled `demo-data.ts` fixtures when `DEMO_MODE=true`; new-request persistence failure is shown clearly.
-4. **Internet/API outage:** use local demo fixtures and the recorded demo.
-5. **Live demo instability:** stop debugging in front of judges and use the recorded 60-second walkthrough.
-
-## DEMO_MODE
-
-Use:
-
-```text
-DEMO_MODE=false
-```
-
-Normal mode reads and writes Supabase.
-
-When `DEMO_MODE=true`, the dashboard uses the same aggregation/display components with bundled, prevalidated seed fixtures. This is not a separate mock UI.
-
-A prepared fallback request can also be used when Gemini is unavailable so the dashboard portion of the demo remains demonstrable.
-
-## External dependencies and failure behavior
-
-| Dependency | Purpose | Failure behavior |
-|---|---|---|
-| Gemini API | Text/audio normalization | Text can fall back to manual/prepared input; dashboard still works from seeded data. |
-| Supabase Postgres | Persistence/context | Use bundled demo fixtures for dashboard; show save failure for new submissions. |
-| Browser microphone | Optional voice | Fall back to text immediately. |
-| Vercel | Deployment | Use local build and recorded demo while restoring deployment. |
-| Official OGD/IIG sources | Future data ingestion | No runtime effect in MVP. |
-| Supabase Auth | Future planner access | No effect in MVP because authentication is not required. |
-| Supabase Storage | Future governed file storage | No effect because raw audio is not stored. |
-| pgvector | Future semantic similarity | No effect because MVP does not use embeddings. |
-
-## Riskiest assumption
-
-**Gemini can reliably normalize short Indian-language citizen requests into the required district/category schema quickly enough for the demo.**
-
-## Fastest practical test for that assumption
-
-Spend **20 minutes before implementing the dashboard**:
-
-- test 5 multilingual text requests first;
-- if voice is desired, test 3 short recordings in browsers you can actually use;
-- check district, category, language, concise summary, and response time.
-
-**Pass:** the structured results are consistently usable.
-
-**Kill voice:** browser/audio handling or transcription is unstable. Keep multilingual text.
-
-## Environment variables
-
-```text
-NEXT_PUBLIC_SUPABASE_URL=
-NEXT_PUBLIC_SUPABASE_ANON_KEY=
-SUPABASE_SERVICE_ROLE_KEY=   # server only if actually required
-GEMINI_API_KEY=              # server only
-GEMINI_MODEL=gemini-3.8-flash
-NEXT_PUBLIC_APP_URL=
-DEMO_MODE=false
-```
-
-## Decisions log
-
-| ID | Decision | Why |
-|---|---|---|
-| D001 | Next.js Route Handlers instead of FastAPI | One deployment and no Python-specific workload. |
-| D002 | Text is the guaranteed intake path | Lowest technical risk in a 12-hour solo build. |
-| D003 | Voice is optional after a viability test | Browser audio is the highest-risk UI/API path. |
-| D004 | Gemini structured output | Makes extraction predictable and easy to validate. |
-| D005 | Deterministic priority formula | Transparent and testable; avoids pretending the LLM is the policy decision-maker. |
-| D006 | Context key is state + district + category | Prevents comparing one infrastructure category to unrelated district context. |
-| D007 | ~50 synthetic requests across 8 districts | Enough visual signal without spending hours hand-authoring data. |
-| D008 | Demo investment coverage is a proxy | The MVP has no live project ledger and must not imply otherwise. |
-| D009 | No embeddings/pgvector | Not needed for the aggregation use case. |
-| D010 | No authentication | Not required to prove the judging flow; removes a deployment failure mode. |
-| D011 | DEMO_MODE exists from day one | Prevents external service failure from killing the demo. |
-| D012 | Project recommendations are category mappings | Avoids a second AI call and keeps recommendations deterministic. |
+1. **Gemini API 429/503/Timeout:** Automatically invokes `getPreparedFallback()` with keyword classification and pilot location mapping; informs the citizen with an inline alert and allows manual adjustment.
+2. **Supabase Postgres Offline / Missing Credentials:** Persistence layer switches to `localRequestStore` initialized from seed fixtures, maintaining full UUID generation and dynamic signal updates.
+3. **Voice Input:** Cut after TASK-003 viability evaluation; text intake with 1-click multilingual test presets guarantees zero-latency execution.

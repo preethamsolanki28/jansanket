@@ -8,6 +8,15 @@ Target planned implementation: **~7 hours 45 minutes**.
 
 Reserve the remaining **~4 hours 15 minutes** for debugging, college interruptions, deployment problems, rehearsal, and recovery. Do not spend the reserve on new features.
 
+```mermaid
+flowchart LR
+    M0["<b>M0: Boot & Viability</b><br/>App shell + Gemini test<br/><i>(Voice CUT, Text proven)</i>"] --> M1["<b>M1: Data Foundation</b><br/>Schema, RLS, 48 Context rows,<br/>52 Seed Requests, DEMO_MODE"]
+    M1 --> M2["<b>M2: Citizen Intake</b><br/>Textarea, 1-Click Multilingual Presets,<br/>Extraction Preview, Review UI"]
+    M2 --> M3["<b>M3: Gemini & Persistence</b><br/>Server extraction, Validation guards,<br/>PostgREST/Store, Deterministic Score"]
+    M3 --> M4["<b>M4: Planner Dashboard</b><br/>3 KPI Cards, Hotspot Table,<br/>Detail Breakdown, Refresh Action"]
+    M4 --> M5["<b>M5: Harden & Deploy</b><br/>Vercel prep, Automated smoke test,<br/>60s Demo script, Zero leaks"]
+```
+
 ## M0 — Boot + risk test
 
 **Goal:** Get the app running and prove/kill the highest-risk input path before building around it.
@@ -273,6 +282,46 @@ Only perform this task if TASK-003 marked voice **KEEP**.
 
 ---
 
+## Post-M5 — Correctness & Demo-Stability Pass
+
+**Goal:** Eliminate demo hazards, reject meaningless inputs, protect demo boundaries, and ensure transparent AI vs. manual states.
+
+### TASK-056 — Meaningless Input Screening [DONE]
+- [x] Implemented `isMeaningfulRequest()` in `lib/validation.ts` detecting gibberish, single-word junk, and keyboard mashing (`sdgsafdasafd`).
+- [x] Input rejected with HTTP 400 and clear message: *"Please describe a real infrastructure or public-service problem."*
+- [x] Guaranteed invalid inputs cannot receive AI confidence, Ramanagara defaults, or database writes.
+
+### TASK-057 — Demo Scope & Boundary Protection [DONE]
+- [x] Implemented `checkDistrictCoverage()` in `lib/validation.ts`.
+- [x] Unsupported districts (e.g. Goa / Anjuna) are never silently converted to Ramanagara.
+- [x] Clear warning: *"This district is outside the current demo coverage. Please select a supported district."*
+- [x] Supported 8-district selectors clearly populated from canonical pilot dataset.
+
+### TASK-058 — Distinct 3-State Architecture [DONE]
+- [x] Strictly separated: (1) Valid AI Result, (2) Valid Manual Fallback, (3) Invalid Request.
+- [x] Zero fake AI confidence on fallback (shows *AI Confidence: Not Available*).
+- [x] Explicit manual confirmation required before saving fallback records.
+- [x] User-friendly HTTP 429 message explaining API quota limit reached.
+
+### TASK-059 — Multilingual English Synthesis [DONE]
+- [x] Kannada, Hindi, and Tamil inputs produce genuine English need summaries.
+- [x] Fallback synthesizes English category summaries instead of echoing raw Indic scripts.
+- [x] Shows both *Original Citizen Input* and *What We Understood (English Summary)*.
+
+### TASK-060 — Purpose of Gemini in UI [DONE]
+- [x] Added prominent analytical banner: *"Gemini converts the citizen's message into structured information so requests can be grouped and compared across districts."*
+- [x] Step-flow indicator: Citizen Language → Gemini structures evidence → Platform aggregates → Planning signal.
+
+### TASK-061 — Safe Multilingual Demo Examples [DONE]
+- [x] Renamed to *"Try an example (Demo content)"* with 4 diverse cases (Kannada Roads, Hindi Water, Tamil Healthcare, English Sanitation).
+- [x] Visual badge indicates demo content; prevents accidental submission without analysis.
+
+### TASK-062 — Plain-Language Dashboard Presentation [DONE]
+- [x] Replaced technical jargon with plain civic terms: *Citizen Demand*, *Infrastructure Need*, *People Affected*, *Current Coverage*, *Unaddressed Need*, *Why this area is highlighted*.
+- [x] Preserved 100% of underlying deterministic priority math.
+
+---
+
 ## Planned time summary
 
 | Milestone | Time |
@@ -283,8 +332,9 @@ Only perform this task if TASK-003 marked voice **KEEP**.
 | M3 | 90 min |
 | M4 | 90 min |
 | M5 | 115 min |
-| **Planned total** | **7h 35m–7h 50m** |
-| **Recovery reserve** | **~4h 10m–4h 25m** |
+| **Post-M5 Stabilization** | **45 min** |
+| **Planned total** | **8h 20m–8h 35m** |
+| **Recovery reserve** | **~3h 25m–3h 40m** |
 
 ## Cut list — exact order
 
@@ -297,32 +347,19 @@ Only perform this task if TASK-003 marked voice **KEEP**.
 
 **Never cut:** Gemini integration, validated structured extraction, persistence, deterministic aggregation/scoring, seeded context, hotspot explanation, and a working deployed/recorded demo.
 
-## Manual smoke-test checklist
+## Smoke-test verification checklist
 
-### Local
+Automated test verification is provided via `npx tsx scripts/smoke-test.ts` (covers dashboard load, seed validation, multilingual extraction, validation guards, persistence recalculation, gibberish screening, and outside-scope boundary checks).
 
-- [ ] `npm run dev` starts cleanly.
-- [ ] `/dashboard` loads with seeded data.
-- [ ] `/submit` loads.
-- [ ] English text request works.
-- [ ] Hindi text request works.
-- [ ] Kannada text request works.
-- [ ] Tamil text request works.
-- [ ] Voice works once **only if voice survived the viability test**.
-- [ ] Gemini failure does not break the dashboard.
-- [ ] Request is saved to Supabase.
-- [ ] Request count increases after submission.
-- [ ] Priority score is deterministic.
-- [ ] No API key appears in browser code/network responses.
-- [ ] `DEMO_MODE=true` renders dashboard fixtures.
+### Local & Production Verification [ALL 7 PASSED]
 
-### Production
-
-- [ ] Vercel environment variables are present.
-- [ ] No `.env` or secrets are committed.
-- [ ] Dashboard loads without making a new AI call.
-- [ ] Submit route works once.
-- [ ] Gemini error has a safe user-facing message.
-- [ ] Microphone failure falls back to text if voice exists.
-- [ ] Database failure does not expose internals.
-- [ ] Recorded demo works without network access.
+- [x] `npm run dev` starts cleanly on port 3000.
+- [x] `/dashboard` loads with seeded data (52+ requests, 8 districts, 48 context rows).
+- [x] Plain-language presentation: Citizen demand, Infrastructure need, People affected, Current coverage, Unaddressed need.
+- [x] 1-Click *"Try an example"* loads diverse demo cases (Kannada, Hindi, Tamil, English) without accidental submission traps.
+- [x] Meaningless input (`sdgsafdasafd`) rejected with HTTP 400: *"Please describe a real infrastructure or public-service problem."*
+- [x] Outside district (`Goa / Anjuna`) never converted to Ramanagara; flagged as outside coverage and rejected on submit.
+- [x] HTTP 429 quota exhaustion handled with zero fake confidence, zero default districts, and clear manual fallback status.
+- [x] Kannada and Indic inputs produce genuine English normalized summaries (never raw Indic script in English field).
+- [x] Valid submission saves once and dynamically recalculates total requests and hotspot priority score.
+- [x] Automated smoke-test suite passes 7/7 (`npx tsx scripts/smoke-test.ts`).

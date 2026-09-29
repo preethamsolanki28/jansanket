@@ -31,6 +31,13 @@ The product is designed so the same workflow can aggregate across states and fee
 
 The defensible MVP gap is **decision support between citizen voice and infrastructure planning**:
 
+```mermaid
+flowchart LR
+    A[Scattered Citizen Voice<br/>Everyday Language & Scripts] -->|Gemini Normalization| B[Structured Demand Evidence<br/>District + Sector]
+    B --> C[Macro Baseline Context<br/>Deficit & Committed Coverage]
+    C -->|Deterministic Weights| D[Explainable Priority Signal<br/>Transparent Policymaker Score]
+```
+
 > **Raw citizen signals → normalized issue + location → district-level demand aggregation → infrastructure/investment context → transparent priority signal.**
 
 This is materially different from simply filing or routing a grievance. The product should not promise to replace CPGRAMS, MyGov, planning departments, or government officers.
@@ -45,16 +52,16 @@ This is materially different from simply filing or routing a grievance. The prod
 
 | Judging criterion | MVP response |
 |---|---|
-| Functioning end-to-end flow | Citizen submits text or records short voice → Gemini extracts structured request → request is stored → dashboard recalculates hotspot and priority signal. |
-| Mandatory Google AI integration | Gemini API performs multilingual request normalization and voice/audio understanding. Gemini structured output is used so the response must conform to the application's schema. |
-| Real or realistic data | 120 realistic synthetic citizen requests across 12 Indian districts plus realistic district-context records. The UI explicitly labels the demo dataset as synthetic; the schema is designed around public Indian datasets. |
-| Built for India | Data model is state/district based, supports Indian languages, and uses national-style infrastructure and investment context rather than one-city assumptions. |
-| Multilingual/voice support | Text and short browser-recorded voice are supported. Gemini identifies language and normalizes the request. MVP language examples: English, Hindi, Kannada and Tamil. |
+| Functioning end-to-end flow | Citizen submits multilingual text request → Gemini extracts structured request → request is stored → dashboard recalculates hotspot and priority signal. |
+| Mandatory Google AI integration | Gemini API (`gemini-3.8-flash`) performs multilingual request normalization. Gemini structured output is used so the response conforms to the application's schema. |
+| Real or realistic data | 52 realistic synthetic citizen requests across 8 Indian districts in 4 states, plus 48 realistic district-context records. The UI explicitly labels the demo dataset as `demo_synthetic`; the schema is designed around public Indian datasets (OGD, IIG). |
+| Built for India | Data model is state/district based, supports Indian languages (English, Hindi, Kannada, Tamil), and uses national-style infrastructure and investment context rather than one-city assumptions. |
+| Multilingual support | Multilingual text intake is the guaranteed path with 1-click test presets for English, Hindi, Kannada, and Tamil. Voice was evaluated during viability testing and cut to ensure a zero-latency, barrier-free demonstration without browser microphone permission hazards. |
 | Deployable prototype | Next.js on Vercel with Supabase and server-side Gemini calls; no required live government API dependency. |
 
 ## Data reality
 
-Do **not** pretend the seed data are official government statistics. The hackathon permits realistic sample data. The MVP uses realistic synthetic values with explicit provenance labels. The production path would ingest official district-level datasets from the Government of India's Open Government Data platform and investment/project sources.
+Do **not** pretend the seed data are official government statistics. The hackathon permits realistic sample data. The MVP uses realistic synthetic values with explicit `demo_synthetic` provenance labels. The production path would ingest official district-level datasets from the Government of India's Open Government Data platform and investment/project sources.
 
 Useful official data-source candidates include:
 
@@ -68,7 +75,7 @@ These sources are **reference/data-source candidates for the MVP**, not runtime 
 
 ## Success = the 60-second demo shows ...
 
-**a citizen speaking a short request in an Indian language → Gemini returns the transcript, detected language, district, issue category and severity → the request is saved → the district/category demand signal and priority score visibly update on the policymaker dashboard → the score can be explained using demand, infrastructure gap, population impact and unaddressed investment coverage.**
+**a citizen submitting a request in an Indian language (e.g. English, Kannada, Hindi, or Tamil) → Gemini returns the detected language, district, issue category, need summary, and severity → the request is validated and saved → the district/category demand signal and priority score visibly update on the policymaker dashboard → the score can be explained using demand intensity, baseline infrastructure gap, population impact, and unaddressed investment coverage.**
 
 ## Core product boundary
 
