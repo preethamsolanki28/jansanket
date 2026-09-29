@@ -9,31 +9,35 @@ JanSanket is an AI-powered Digital Public Good prototype that converts multiling
 
 ### Implemented Workflow
 ```mermaid
-flowchart LR
-    A[Citizen Input<br/>Multilingual] --> B[Input Screening<br/>isMeaningfulRequest]
-    B -->|Meaningless / Gibberish| X[HTTP 400 Reject<br/>No DB Write]
-    B -->|Valid Problem| C[Next.js Server Route<br/>/api/requests]
-    C --> D[OpenRouter GPT-4o-mini<br/>lib/ai.ts]
-    D -->|Success| E[Valid AI Result<br/>AI Confidence & English Translation]
-    D -.->|HTTP 429 / Outage| F[Valid Manual Fallback<br/>Zero Fake Confidence]
-    E --> G[Strict Schema & Coverage<br/>lib/validation.ts]
-    F --> G
-    G --> H[Persistence Layer<br/>lib/db.ts]
-    H --> I[(Supabase Postgres<br/>or Active Demo Store)]
-    I --> J[Deterministic Priority Engine<br/>lib/priority.ts]
-    J --> K[Planner Dashboard<br/>/dashboard]
+flowchart TD
+    Citizen[Citizen Intake /submit] --> IntakeAI[OpenRouter GPT-4o-mini<br/>Language & Field Extraction]
+    IntakeAI --> Identification[State + District Identification<br/>Auto-detected or User Input]
+    Identification --> GeoVal[Deterministic Geographic Validation<br/>lib/india-locations.ts]
+    GeoVal -->|Valid State + District| Stored[Citizen Request Stored in Database<br/>lib/db.ts]
+    GeoVal -->|State/District Mismatch| Reject[HTTP 422 Rejection<br/>Clear Mismatch Message]
+    
+    Stored --> IsPilot{"Is district in pilot set?<br/>(8 Pilot Districts)"}
+    IsPilot -- Yes --> Priority[Deterministic Priority Engine<br/>lib/priority.ts]
+    Priority --> Hotspot[High-Need Areas Hotspots Table<br/>lib/priority.ts]
+    
+    IsPilot -- No --> Outside[Stored as Outside Pilot Coverage<br/>No Fabricated Score]
+    
+    Hotspot --> DASH[/dashboard<br/>Planner Dashboard]
+    Outside --> DASH_ALL[All Citizen Requests Section<br/>Complete Request Visibility]
+    Stored --> DASH_ALL
+    DASH_ALL --> DASH
 ```
 
 ### 1. Three Distinct Intake States
 - **State 1: VALID AI RESULT**
   - Trigger: Successful OpenRouter (`openai/gpt-4o-mini`) analysis via structured JSON.
   - UI: Displays *AI: GPT-4o-mini (OpenRouter)* badge, genuine AI confidence (e.g. 94%), original citizen text, and an English normalized summary.
-  - Explanatory banner explains AI's role in structuring citizen language for district aggregation (and clarifies that AI does NOT calculate priority scores).
+  - Simplified citizen UX: Removed technical AI pipeline explainer box so citizens focus on what they submitted, what was understood, and validation status.
 - **State 2: VALID MANUAL FALLBACK**
-  - Trigger: Gemini HTTP 429 quota exhaustion or backend timeout.
+  - Trigger: HTTP 429 quota exhaustion or backend timeout.
   - UI: Displays *Manual Fallback Review (AI Unavailable)* badge and *AI Confidence: Not Available* (**zero fake confidence**).
   - Synthesizes a genuine English category summary (never copies raw Indic text into English fields).
-  - Never defaults to Ramanagara; user must explicitly verify and select a supported district.
+  - Never defaults to Ramanagara; user explicitly verifies and selects valid State and District.
   - Requires explicit user checkbox confirmation before submission.
 - **State 3: INVALID REQUEST**
   - Trigger: Meaningless text, keyboard mash (`sdgsafdasafd`), greetings, test spam, casual statements (`hello there how are you`, `this is a test`, `I like apples`).
@@ -41,12 +45,16 @@ flowchart LR
   - Blocked with HTTP 400: *"Please describe a real infrastructure or public-service problem."*
   - Zero AI confidence, zero district default, zero database write.
 
-### 2. Demo Scope & Boundary Protection
-- **Pilot Coverage:** Strictly 8 districts across 4 states (Karnataka: Ramanagara, Tumakuru; UP: Bahraich, Varanasi; Rajasthan: Barmer, Dausa; Tamil Nadu: Dharmapuri, Madurai).
-- **State-District Pair Matching:** State and district are strictly validated as a matching pair.
+### 2. Geographic Scope & Pilot Analytics Separation
+- **Citizen Intake Scope:** India-wide. A citizen from any of India's 28 States and 8 Union Territories can submit a complaint.
+- **Planning Analytics Scope:** Scored only for the 8 pilot districts across 4 states with baseline infrastructure context (`demo_synthetic`).
+- **State-District Pair Matching:** Strictly deterministic static validation (`lib/india-locations.ts`).
   - Example: `State = Goa, District = Ramanagara` is rejected (Ramanagara belongs to Karnataka, not Goa).
-  - Example: `State = Goa, District = Anjuna` is rejected (outside pilot coverage).
-  - Supported pilot district dropdown automatically derives and locks the valid state.
+  - Example: `State = Karnataka, District = Ramanagara` is valid and scored in pilot hotspots.
+  - Example: `State = Goa, District = North Goa` is accepted and stored as *"Outside Pilot Coverage"* without a fake priority score.
+  - Normalizes common aliases (e.g. `Bangalore` $\rightarrow$ `Bengaluru Urban`).
+  - Never uses LLM tokens to validate static geography.
+  - Never defaults or forces to Ramanagara when district is unspecified.
 
 ### 3. Safe Multilingual Demo Examples
 - Renamed to *"Try an example (Demo content)"* with 4 diverse cases:
@@ -69,6 +77,7 @@ flowchart LR
   - Hotspot Evidence Breakdown $\rightarrow$ **Why This Area Needs Attention**
 - Mathematical integrity preserved:
   $$\text{Priority Score} = 0.40 \times \text{Demand} + 0.30 \times \text{Need} + 0.15 \times \text{People Affected} + 0.15 \times \text{Unaddressed Need}$$
+- **All Citizen Requests Table:** Comprehensive, horizontally scrollable log of all requests (52+ seed requests + newly submitted), displaying ID, State, District, Category, English summary, Severity, Language, Source, Pilot Status badge (*In Pilot Coverage* vs *Outside Pilot Coverage*), and Timestamp.
 
 ### 5. Database Write Security & Supabase Fallback Hardening
 - **RLS Write Security:** `citizen_requests` INSERT access is restricted strictly to `service_role` via `supabase/migrations/20260929000004_fix_write_security.sql`. Browser/client anonymous direct inserts are completely blocked.
@@ -100,6 +109,12 @@ flowchart LR
 - **D007 (Post-M5):** 3-state pipeline guarantees: invalid input is rejected with HTTP 400; manual fallback shows zero fake confidence; unsupported districts and mismatched state-district pairs are never silently altered.
 - **D008 (Post-M5):** Database security: client writes must traverse server route; anon INSERT policy removed; Supabase write failure returns HTTP 503 instead of false success.
 - **D009 (AI Provider Migration):** AI extraction is abstracted into `normalizeCitizenRequest(...)` in `lib/ai.ts`, powered by OpenRouter + `openai/gpt-4o-mini` with strict structured outputs, falling back to clean manual review on provider rate limits or errors.
+- **D010 (Post-M5 UX & Data-Scope Expansion):**
+  - Removed "How JanSanket uses AI" box from `/submit` to keep the citizen flow focused strictly on civic intake.
+  - Expanded citizen intake to **all 28 States and 8 UTs** across India.
+  - Implemented deterministic static geographic validation (`lib/india-locations.ts`) avoiding unnecessary LLM calls for state-district lookups.
+  - Separated intake from pilot analytics: non-pilot requests are stored faithfully as *"Outside Pilot Coverage"* without fabricating context metrics or priority scores.
+  - Expanded `/dashboard` and `/api/dashboard` with an **All Citizen Requests** section providing complete visibility across all 52+ recorded requests alongside the 8-district pilot hotspot ranking.
 
 ---
 

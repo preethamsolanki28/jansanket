@@ -2,21 +2,30 @@
 
 ## 1. Core Architectural Non-Negotiables
 1. **Responsibility Separation:**
-   - **AI Responsibility (OpenRouter GPT-4o-mini / Gemini):** Unstructured citizen input $\rightarrow$ structured fields (`language`, `state`, `district`, `category`, `need_summary`, `severity`, `confidence`).
-   - **Application Responsibility:** Strict schema validation, canonical district mapping, database persistence, and **deterministic priority calculation**.
+   - **AI Responsibility (OpenRouter GPT-4o-mini):** Unstructured citizen input $\rightarrow$ structured fields (`language`, `state`, `district`, `category`, `need_summary`, `severity`, `confidence`).
+   - **Application Responsibility:** Strict schema validation, deterministic geographic validation (`lib/india-locations.ts`), database persistence, and **deterministic priority calculation**.
    - **Never let AI calculate the priority score, allocate budgets, or approve projects.**
-2. **Security & Secrets:**
-   - Never expose `OPENROUTER_API_KEY`, `GEMINI_API_KEY`, or `SUPABASE_SERVICE_ROLE_KEY` to the client browser.
+   - **Never spend LLM calls on static geographic validation:** State-district validation must be deterministic.
+2. **Citizen Intake vs. Pilot Analytics Separation:**
+   - Citizen intake accepts valid submissions from **all 28 Indian States and 8 Union Territories**.
+   - Planning analytics and hotspot rankings are restricted strictly to the 8 pilot districts where baseline context exists.
+   - Non-pilot requests must be stored faithfully as *"Outside Pilot Coverage"*; **never fabricate context metrics or priority scores for them**.
+   - Never default or force district to Ramanagara when district is unspecified; prompt the user.
+3. **Citizen Channel vs. AI Provider:**
+   - `source` represents the citizen input channel (`text`, `voice`, `manual_fallback`). Never put `"ai"` or provider names in `source`.
+   - `provider` tracks the AI provider (`openrouter`, `manual_fallback`).
+4. **Security & Secrets:**
+   - Never expose `OPENROUTER_API_KEY` or `SUPABASE_SERVICE_ROLE_KEY` to the client browser.
    - Never prefix server secrets with `NEXT_PUBLIC_`.
    - Never commit `.env`, `.env.local`, API keys, or credentials.
-3. **Database Write Path:**
+5. **Database Write Path:**
    - Browsers must never write directly to Supabase. Next.js server routes (`app/api/requests/route.ts`) own persistence.
    - All input must be validated server-side via `validateCitizenRequest()` in `lib/validation.ts`. Invalid model output must be rejected with HTTP 422.
-4. **Data Integrity & Provenance:**
+6. **Data Integrity & Provenance:**
    - District context is strictly keyed by `state + district + category`.
    - All baseline demonstration metrics must be labeled `demo_synthetic`. Never present synthetic demo values as official government statistics.
    - No PII: Do not collect or store Aadhaar numbers, phone numbers, personal names, or exact home addresses.
-5. **Resiliency & Fallbacks:**
+7. **Resiliency & Fallbacks:**
    - `DEMO_MODE=true` and unconfigured Supabase mode must gracefully fall back to active memory fixtures without throwing unhandled exceptions.
    - Always preserve `getPreparedFallback()` in `lib/ai.ts` so AI quota limits (429) or outages (503) never trap the user.
 

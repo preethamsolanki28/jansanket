@@ -9,15 +9,17 @@ JanSanket converts unstructured multilingual citizen development requests into n
 State and national infrastructure planning teams across India struggle to consolidate fragmented citizen requests arriving via diverse linguistic regions and formats. Existing grievance portals (like CPGRAMS) log individual tickets for dispute resolution, but planning departments lack an aggregated demand signal to compare citizen needs against baseline infrastructure deficits and committed investments.
 
 ## What the MVP Actually Does
-1. **Multilingual Citizen Intake (`/submit`):** Accepts citizen requests in English, Hindi, Kannada, or Tamil with safe, clearly badged demo examples (*"Try an example"*).
-2. **Defensive Input Screening:** Rejects meaningless text and keyboard mashing (e.g. `sdgsafdasafd`) with HTTP 400 (*"Please describe a real infrastructure or public-service problem."*).
-3. **Three Distinct Intake States:**
-   - **Valid AI Result:** Gemini 3.8 Flash extracts structured fields, genuine AI confidence, and an English translation.
-   - **Valid Manual Fallback:** Engages on HTTP 429 quota exhaustion; shows zero fake confidence, synthesizes English summaries, and requires explicit user confirmation.
-   - **Invalid Request:** Gibberish is rejected; zero confidence, zero district default, zero database writes.
-4. **Honest Pilot Scope:** Covers strictly 8 pilot districts across 4 states. Locations outside coverage (e.g. Goa / Anjuna) are never silently converted to Ramanagara.
-5. **Deterministic Priority Scoring:** Pure TypeScript logic computes transparent priority scores ($0.40 \times \text{Demand} + 0.30 \times \text{Need} + 0.15 \times \text{People Affected} + 0.15 \times \text{Unaddressed Need}$) and maps sector categories to standard public project interventions.
-6. **Plain-Language Planner Dashboard (`/dashboard`):** Displays live summaries (*Citizen Demand*, *Districts Monitored*, *High-Need Areas*), a ranked hotspot table, and an interactive **"Why this area is highlighted"** breakdown.
+1. **Multilingual Citizen Intake (`/submit`):** Accepts citizen requests in English, Hindi, Kannada, Tamil, or any Indian language from **any Indian State or Union Territory** (28 States + 8 UTs) with safe demo presets (*"Try an example"*).
+2. **Defensive Input Screening:** Rejects meaningless text, casual chat, and keyboard mashing (e.g. `sdgsafdasafd`, `hello there`) with HTTP 400 (*"Please describe a real infrastructure or public-service problem."*).
+3. **Clean Citizen Intake UX:** Direct, citizen-centric intake without technical AI pipeline explanations. Automatically extracts or prompts for state and district, normalizes aliases deterministically (e.g. Bangalore $\rightarrow$ Bengaluru Urban), and strictly validates state-district pairs without spending LLM tokens on static geography.
+4. **Architectural Separation (Intake vs Analytics):**
+   - **Citizen Intake:** India-wide. A citizen from any valid district can submit a verified complaint.
+   - **Planning Analytics:** Scoped to 8 pilot districts across 4 states with baseline infrastructure context (`demo_synthetic`).
+   - Requests from outside pilot districts are stored faithfully as *"Outside Pilot Coverage"*, never assigned fabricated priority scores, and never mixed into the scored hotspot ranking.
+5. **Deterministic Priority Scoring:** Pure TypeScript logic computes transparent priority scores ($0.40 \times \text{Demand} + 0.30 \times \text{Need} + 0.15 \times \text{People Affected} + 0.15 \times \text{Unaddressed Need}$) for pilot districts.
+6. **Comprehensive Planner Dashboard (`/dashboard`):**
+   - **High-Need Areas:** Ranked hotspot table and interactive **"Why this area is highlighted"** breakdown for monitored pilot districts.
+   - **All Citizen Requests:** Complete, horizontally-scrollable log of all recorded citizen requests (~52+ seed requests + new submissions) with real-time pilot coverage status badges (*In Pilot Coverage* vs *Outside Pilot Coverage*).
 
 ---
 
@@ -25,50 +27,22 @@ State and national infrastructure planning teams across India struggle to consol
 
 ```mermaid
 flowchart TD
-    subgraph Client ["Client Browser (/submit & /dashboard)"]
-        A[Citizen Intake /submit]
-        DASH[Planner Dashboard /dashboard]
-    end
-
-    subgraph Server ["Next.js Server Runtime"]
-        API_REQ[POST /api/requests]
-        API_DASH[GET /api/dashboard]
-        SCREEN{isMeaningfulRequest?<br/>lib/validation.ts}
-        VAL[Strict Schema & Coverage Validation<br/>lib/validation.ts]
-        PERSIST[Persistence Layer<br/>lib/db.ts]
-        ENGINE[Deterministic Priority Engine<br/>lib/priority.ts]
-    end
-
-    subgraph ThreeStates ["3 Distinct Intake States"]
-        S1["<b>1. VALID AI RESULT</b><br/>Gemini extracted, AI confidence shown,<br/>English translation verified"]
-        S2["<b>2. VALID MANUAL FALLBACK</b><br/>HTTP 429 quota fallback, zero fake confidence,<br/>user explicitly confirms fields"]
-        S3["<b>3. INVALID REQUEST</b><br/>Gibberish rejected, zero confidence,<br/>no district assigned, no save allowed"]
-    end
-
-    subgraph External ["External Services & Data"]
-        GEMINI[Gemini 3.8 Flash<br/>Google Generative AI]
-        FALLBACK[Manual Fallback Engine<br/>lib/gemini.ts]
-        DB[(Supabase Postgres<br/>or In-Memory Fallback)]
-        SEEDS[Bundled Demo Fixtures<br/>48 Contexts / 52 Requests]
-    end
-
-    A -->|Raw Text + Hints| API_REQ
-    API_REQ --> SCREEN
-    SCREEN -->|Meaningless / Gibberish| S3
-    SCREEN -->|Valid Citizen Problem| GEMINI
-
-    GEMINI -->|Success: Structured JSON| S1 --> VAL
-    GEMINI -.->|Quota Exceeded / 429| FALLBACK --> S2 --> VAL
-    VAL -->|Validated Request| PERSIST
-    PERSIST -->|PostgREST Write| DB
-    PERSIST -.->|Offline / DEMO_MODE| SEEDS
-
-    DASH -->|Fetch Signals| API_DASH
-    API_DASH --> PERSIST
-    PERSIST -->|Read Requests & Context| DB
-    DB --> ENGINE
-    ENGINE -->|Ranked Hotspots + Plain-Language Breakdown| API_DASH
-    API_DASH -->|Live Updates| DASH
+    Citizen[Citizen Intake /submit] --> IntakeAI[OpenRouter GPT-4o-mini<br/>Language & Field Extraction]
+    IntakeAI --> Identification[State + District Identification<br/>Auto-detected or User Input]
+    Identification --> GeoVal[Deterministic Geographic Validation<br/>lib/india-locations.ts]
+    GeoVal -->|Valid State + District| Stored[Citizen Request Stored in Database<br/>lib/db.ts]
+    GeoVal -->|State/District Mismatch| Reject[HTTP 422 Rejection<br/>Clear Mismatch Message]
+    
+    Stored --> IsPilot{"Is district in pilot set?<br/>(8 Pilot Districts)"}
+    IsPilot -- Yes --> Priority[Deterministic Priority Engine<br/>lib/priority.ts]
+    Priority --> Hotspot[High-Need Areas Hotspots Table<br/>lib/priority.ts]
+    
+    IsPilot -- No --> Outside[Stored as Outside Pilot Coverage<br/>No Fabricated Score]
+    
+    Hotspot --> DASH[/dashboard<br/>Planner Dashboard]
+    Outside --> DASH_ALL[All Citizen Requests Section<br/>Complete Request Visibility]
+    Stored --> DASH_ALL
+    DASH_ALL --> DASH
 ```
 
 ### Responsibility Boundary
@@ -165,11 +139,11 @@ The automated smoke test verifies:
 1. **Dashboard Overview (0–8s):** Open `/dashboard`. Observe 52+ seeded requests across 8 pilot districts. Point out Rank #1 hotspot: **Ramanagara Roads** with priority score **79.7**.
 2. **Citizen Submission (8–20s):** Click **"Submit Request"**. In the **"Try an example"** section, click **"ಕನ್ನಡ (Roads - Ramanagara)"**:
    > *“ಮಳೆ ಬಂದಾಗ ನಮ್ಮ ಗ್ರಾಮದ ರಸ್ತೆ ಬಳಸಲು ಸಾಧ್ಯವಾಗುವುದಿಲ್ಲ, ರಾಮನಗರ ಜಿಲ್ಲೆಯ ಶಾಲೆಗೆ ಹೋಗಲು ಕಷ್ಟವಾಗುತ್ತಿದೆ.”*
-3. **AI Normalization & Purpose (20–32s):** Click **"Analyze Request"**. Point to the banner: *"AI converts the citizen's message into structured information so requests can be grouped and compared across districts."* Observe that Kannada was translated into a concise English need summary.
+3. **AI Normalization (20–32s):** Click **"Analyze Request"**. Observe that Kannada was translated into a concise English need summary, category set to Roads, and location resolved to Ramanagara, Karnataka.
 4. **Validation & Confirmation (32–42s):** Acknowledge the demo submission checkbox and click **"Confirm & Submit Request"**. A unique UUID is assigned and persisted. Click **"View Planning Signals"**.
-5. **Explain the Hotspot (42–60s):** On `/dashboard`, observe that **Ramanagara Roads** has updated dynamically (score jumps to **83.3**). Click the row to inspect **"Why This Area Needs Attention"**:
+5. **Explain the Hotspot & Complete Visibility (42–60s):** On `/dashboard`, observe that **Ramanagara Roads** has updated dynamically (score jumps to **83.3**). Click the row to inspect **"Why This Area Needs Attention"**:
    $$0.40(100) + 0.30(78.0) + 0.15(72.0) + 0.15(60.8) = \mathbf{83.3}$$
-   Point out that AI structured the evidence, while pure deterministic code calculated the priority score.
+   Scroll down to **"All Citizen Requests"** to show the complete transparent log of all 52+ requests with pilot coverage badges (*In Pilot Coverage* vs *Outside Pilot Coverage*).
 
 ---
 
@@ -182,25 +156,25 @@ code-for-communities/
 │   ├── dashboard/page.tsx           # Planner dashboard page
 │   ├── submit/page.tsx              # Citizen intake page
 │   └── api/
-│       ├── requests/route.ts        # POST: analyze (Gemini) & submit (persistence)
-│       └── dashboard/route.ts       # GET: aggregated planning signals & KPIs
+│       ├── requests/route.ts        # POST: analyze (OpenRouter) & submit (persistence)
+│       └── dashboard/route.ts       # GET: aggregated planning signals, KPIs & all requests
 ├── components/
-│   ├── dashboard-view.tsx           # Interactive dashboard, KPI cards & detail panel
-│   ├── request-form.tsx             # Multilingual form with Try-an-example presets
+│   ├── dashboard-view.tsx           # Interactive dashboard, KPI cards, hotspot detail & All Requests table
+│   ├── request-form.tsx             # Multilingual form with India-wide location selectors & Try-an-example presets
 │   ├── navigation.tsx               # Top header with demo_synthetic badge
 │   └── ui/                          # shadcn primitives (button, card, alert, table)
 ├── lib/
-│   ├── gemini.ts                    # Server-side Gemini client + 429/503 manual fallback
-│   ├── validation.ts                # Meaningfulness screening, schema & coverage rules
+│   ├── ai.ts                        # Server-side OpenRouter (GPT-4o-mini) client + manual fallback
+│   ├── india-locations.ts           # 28 States, 8 UTs, static district validation & aliases
+│   ├── validation.ts                # Meaningfulness screening, schema & geographic validation
 │   ├── priority.ts                  # Deterministic priority formula & project mapping
 │   ├── db.ts                        # Supabase PostgREST client & demo store fallback
 │   └── demo-data.ts                 # 48 district context rows & 52 citizen requests
 ├── scripts/
-│   ├── smoke-test.ts                # End-to-end production smoke test (7/7 checks)
-│   ├── test-m3-pipeline.ts          # M3 verification suite
-│   ├── test-m4-dashboard.ts         # M4 dashboard verification suite
-│   ├── test-m2-intake.mjs           # M2 intake test suite
-│   └── verify-m1-data.mjs           # M1 data integrity checks
+│   ├── smoke-test.ts                # End-to-end production smoke test (11/11 checks)
+│   ├── test-ai-provider.ts          # AI extraction & geographic validation test suite
+│   ├── verify-ux-data-scope.ts      # UX + Data-scope verification script
+│   └── seed-pilot-data.ts           # Database seed script
 ├── supabase/
 │   ├── migrations/                  # Schema, RLS policies, and seed migrations
 │   └── seed.sql                     # Combined seed script
@@ -218,6 +192,6 @@ code-for-communities/
 
 ## Disclaimers & Known Limitations
 - **`demo_synthetic` Baseline:** District baseline metrics (population, infrastructure need index, investment coverage) are realistic simulated proxies structured after open government data formats (data.gov.in, India Investment Grid). They are labeled `demo_synthetic` and must not be used as official government statistics.
-- **8-District Pilot Scope:** The prototype covers strictly 8 pilot districts across Karnataka, Uttar Pradesh, Rajasthan, and Tamil Nadu. Outside districts are flagged honestly rather than hallucinating context.
+- **National Intake vs. Pilot Analytics:** Citizen intake accepts and validates complaints from **any of India's 28 States and 8 Union Territories**. Scored planning analytics and hotspot rankings are currently restricted to the 8 pilot districts where baseline context exists. Non-pilot submissions are stored safely as *"Outside Pilot Coverage"* without fabricated metrics.
 - **Decision Support Only:** JanSanket does not automatically disburse public funds, approve projects, or replace administrative officers. It is a Digital Public Good planning intelligence prototype.
 - **Privacy:** No Aadhaar numbers, phone numbers, personal names, or exact home addresses are collected or stored.

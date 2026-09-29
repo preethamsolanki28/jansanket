@@ -336,6 +336,17 @@ Only perform this task if TASK-003 marked voice **KEEP**.
 - [x] UI updated with model-aware badges (`AI: GPT-4o-mini (OpenRouter)`).
 - [x] Added 30-case AI provider test suite (`scripts/test-ai-provider.ts`) covering English, Indic languages (Kannada, Hindi, Tamil), gibberish, non-civic input, missing/unsupported districts, and 429 fallback.
 
+### TASK-066 — UX & Data-Scope Expansion (India-Wide Intake + All Requests Log) [DONE]
+- [x] Removed visible "How JanSanket uses AI" box from `/submit` to keep the citizen flow focused strictly on civic intake.
+- [x] Expanded citizen intake to **all 28 States and 8 Union Territories** across India without pilot restriction.
+- [x] Created `lib/india-locations.ts` with static registry of all Indian states, UTs, districts, and common aliases (e.g. Bangalore $\rightarrow$ Bengaluru Urban).
+- [x] Implemented deterministic state-district validation without spending LLM tokens on static geography.
+- [x] Pre-fills district if auto-detected from text; prompts citizen when missing; never defaults to Ramanagara.
+- [x] Rejection of state-district mismatches (e.g. `Goa + Ramanagara`) with user-friendly error message.
+- [x] Separated citizen intake from pilot analytics: outside-pilot requests are stored faithfully as *"Outside Pilot Coverage"* without fabricating context metrics or priority scores.
+- [x] Expanded `/dashboard` and `/api/dashboard` with an **All Citizen Requests** table displaying all 52+ recorded requests with pilot status badges alongside the 8-district pilot hotspot ranking.
+- [x] Updated automated smoke test suite to 11/11 passing tests (`scripts/smoke-test.ts`).
+
 ---
 
 ## Planned time summary
@@ -349,8 +360,9 @@ Only perform this task if TASK-003 marked voice **KEEP**.
 | M4 | 90 min |
 | M5 | 115 min |
 | **Post-M5 Stabilization** | **60 min** |
-| **Planned total** | **8h 35m–8h 50m** |
-| **Recovery reserve** | **~3h 10m–3h 25m** |
+| **UX & Data Scope Expansion** | **45 min** |
+| **Planned total** | **9h 20m–9h 35m** |
+| **Recovery reserve** | **~2h 25m–2h 40m** |
 
 ## Cut list — exact order
 
@@ -361,22 +373,23 @@ Only perform this task if TASK-003 marked voice **KEEP**.
 5. Extra hotspot filters.
 6. Any optional UI examples beyond the three multilingual sample requests.
 
-**Never cut:** Gemini integration, validated structured extraction, persistence, deterministic aggregation/scoring, seeded context, hotspot explanation, and a working deployed/recorded demo.
+**Never cut:** AI structured extraction, persistence, deterministic aggregation/scoring, seeded context, hotspot explanation, and a working deployed/recorded demo.
 
 ## Smoke-test verification checklist
 
-Automated test verification is provided via `npx tsx scripts/smoke-test.ts` (covers dashboard load, seed validation, multilingual extraction, validation guards, persistence recalculation, secret leakage, non-civic input screening, demo boundary protection, state-district mismatch, and English normalization).
+Automated test verification is provided via `npx tsx scripts/smoke-test.ts` (covers dashboard load, seed validation, multilingual extraction, validation guards, persistence recalculation, secret leakage, non-civic input screening, demo boundary protection, state-district mismatch, outside-pilot submission, and English normalization).
 
-### Local & Production Verification [ALL 9 PASSED]
+### Local & Production Verification [ALL 11 PASSED]
 
 - [x] `npm run dev` starts cleanly on port 3000.
 - [x] `/dashboard` loads with seeded data (52+ requests, 8 districts, 48 context rows).
 - [x] Plain-language presentation: Citizen demand, Infrastructure need, People affected, Current coverage, Unaddressed need, Why This Area Needs Attention.
 - [x] 1-Click *"Try an example"* loads diverse demo cases (Kannada, Hindi, Tamil, English) with demo acknowledgment requirement before submission.
 - [x] Meaningless and non-civic input (`sdgsafdasafd`, `hello there how are you`, `this is a test`, `I like apples`) rejected with HTTP 400: *"Please describe a real infrastructure or public-service problem."*
-- [x] Outside district (`Goa / Anjuna`) never converted to Ramanagara; flagged as outside coverage and rejected on submit.
+- [x] India-wide intake: outside-pilot valid location (`Goa / North Goa`) accepted for storage and badged *"Outside Pilot Coverage"* without a fake score.
 - [x] State-district mismatch (`Goa + Ramanagara`) rejected with HTTP 422: state does not match district.
 - [x] HTTP 429 quota exhaustion handled with zero fake confidence, zero default districts, and clear manual fallback status.
 - [x] Kannada and Indic inputs produce genuine English normalized summaries (never raw Indic script in English field).
 - [x] Valid submission saves once and dynamically recalculates total requests and hotspot priority score.
-- [x] Automated smoke-test suite passes 9/9 (`npx tsx scripts/smoke-test.ts`).
+- [x] All 52+ requests visible in "All Citizen Requests" table on `/dashboard`.
+- [x] Automated smoke-test suite passes 11/11 (`npx tsx scripts/smoke-test.ts`).

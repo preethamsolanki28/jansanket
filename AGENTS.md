@@ -27,16 +27,23 @@ Ask when anything is ambiguous.
 
 ## MVP non-negotiables
 
+- Citizen intake is India-wide across all 28 States and 8 Union Territories.
+- Planning analytics and hotspot rankings are restricted to the 8 pilot districts where `demo_synthetic` context baselines exist.
+- Requests outside the pilot set are stored faithfully with valid state + district and marked "Outside Pilot Coverage" without fabricating priority scores.
+- Geographic validation between State and District is deterministic via static dataset (`lib/india-locations.ts`). Never call LLMs for simple geographic validation.
+- Missing district must be prompted for; never default or force to Ramanagara.
 - Text is the guaranteed citizen-intake path with 1-click multilingual presets (voice was evaluated in TASK-003 and cut due to mobile latency/permissions).
 - Voice is optional and must not block the text flow.
 - AI interprets unstructured input; deterministic application logic computes the planning signal.
 - AI never calculates priority scores, allocates budgets, or approves projects.
+- The deterministic priority formula ($0.40 \times \text{Demand} + 0.30 \times \text{Need} + 0.15 \times \text{People Affected} + 0.15 \times \text{Unaddressed Need}$) must not be modified.
 - District context is keyed by `state + district + category`.
 - Demo context values are labelled synthetic.
 - No authentication is required for the MVP.
 - No pgvector is required for the MVP.
 - No live government-data ingestion is required for the MVP.
 - `DEMO_MODE` must remain available as a demo fallback.
+- Dashboard provides two distinct views: High-Need Areas (pilot hotspots) and All Citizen Requests (complete dataset visibility).
 - Do not turn JanSanket into a generic chatbot.
 - Do not automatically allocate public money or approve projects.
 

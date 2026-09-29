@@ -13,6 +13,8 @@ import { randomUUID } from "crypto";
 import { ValidatedCitizenRequest } from "./validation";
 import { CitizenRequest, DistrictContext, SEED_CITIZEN_REQUESTS, SEED_DISTRICT_CONTEXT } from "./demo-data";
 
+export type { CitizenRequest, DistrictContext };
+
 // In-memory demo store initialized from seed fixtures
 // Allows seamless demonstration when Supabase credentials are not configured or offline
 const localRequestStore: CitizenRequest[] = [...SEED_CITIZEN_REQUESTS];

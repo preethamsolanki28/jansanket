@@ -8,27 +8,27 @@ sequenceDiagram
     actor Presenter
     participant UI as Browser (/dashboard, /submit)
     participant API as Next.js API Routes
-    participant AI as Gemini 3.8 Flash
+    participant AI as OpenRouter GPT-4o-mini
     participant DB as Postgres / Local Store
     
     Presenter->>UI: 1. Open /dashboard (Show 52 requests, Ramanagara Roads #1 at 79.7)
-    Presenter->>UI: 2. Navigate to /submit & click 1-Click English Preset
-    Presenter->>UI: 3. Click "Analyze with Gemini"
+    Presenter->>UI: 2. Navigate to /submit & click 1-Click Kannada Preset
+    Presenter->>UI: 3. Click "Analyze Request"
     UI->>API: POST /api/requests (action: "analyze")
-    API->>AI: Structured extraction (gemini-3.8-flash)
+    API->>AI: Structured extraction (openai/gpt-4o-mini)
     AI-->>API: {category: "roads", district: "Ramanagara", severity: "high", ...}
-    API-->>UI: Preview card with Confidence (0.95) & Human-in-the-loop review
+    API-->>UI: Preview card with Confidence & Location Verification
     Presenter->>UI: 4. Click "Confirm & Submit Request"
     UI->>API: POST /api/requests (action: "submit")
     API->>DB: Server insert (PostgREST or local store)
     DB-->>API: Persisted (UUID assigned)
-    API-->>UI: Success confirmation + "View Planning Signal"
+    API-->>UI: Success confirmation + "View Planning Signals"
     Presenter->>UI: 5. Return to /dashboard
     UI->>API: GET /api/dashboard
     API->>DB: Fetch all requests + context benchmarks
     API->>API: Deterministic recalculation (lib/priority.ts)
-    API-->>UI: Requests: 52 → 53 | Ramanagara Roads: 79.7 → 83.3
-    Presenter->>UI: 6. Point to transparent 40/30/15/15 formula breakdown
+    API-->>UI: Requests: 52 → 53 | Ramanagara Roads: 79.7 → 83.3 | Appears in All Requests
+    Presenter->>UI: 6. Point to transparent 40/30/15/15 formula & All Citizen Requests table
 ```
 
 ### 0–8 sec — Dashboard Baseline
@@ -40,6 +40,7 @@ sequenceDiagram
 
 ### 8–20 sec — Citizen Intake via "Try an Example" (Demo Content)
 - Click **Submit Request** in the header to open `/submit`.
+- Point out that citizen intake is **India-wide** (all 28 States and 8 UTs).
 - Point out the **"Try an example (Demo content)"** section with 4 diverse cases:
   - `ಕನ್ನಡ (Roads - Ramanagara)`
   - `हिन्दी (Water - Bahraich)`
@@ -49,25 +50,23 @@ sequenceDiagram
   > *“ಮಳೆ ಬಂದಾಗ ನಮ್ಮ ಗ್ರಾಮದ ರಸ್ತೆ ಬಳಸಲು ಸಾಧ್ಯವಾಗುವುದಿಲ್ಲ, ರಾಮನಗರ ಜಿಲ್ಲೆಯ ಶಾಲೆಗೆ ಹೋಗಲು ಕಷ್ಟವಾಗುತ್ತಿದೆ.”*
 - Notice the demo badge clearly marking this as example content so it cannot be accidentally confused with a live citizen request.
 
-### 20–32 sec — Gemini Structured Normalization & Purpose
+### 20–32 sec — AI Structured Normalization
 - Click **Analyze Request**.
-- Point out the analytical explainer banner:
-  > *“Gemini converts the citizen's message into structured information so requests can be grouped and compared across districts.”*
-- Show the structured preview:
+- Show the clean structured preview:
   - Original Citizen Input: in Kannada script.
   - What We Understood: clear **English Normalized Need** (*"Citizen reported village road access, damage, or connectivity issues."*).
-  - Assigned District: `Ramanagara, Karnataka` (Pilot verified).
+  - Assigned Location: `Karnataka`, `Ramanagara` (Validated deterministically via static geographic registry).
   - Category: `Roads`.
   - Severity: `Medium / High`.
   - Genuine Confidence badge (or *Manual Fallback Mode* with zero fake confidence if HTTP 429 quota is reached).
-- Emphasize the 3 distinct states: Valid AI Result, Valid Manual Fallback, and Invalid Request.
+- Point out that citizens can enter any Indian state/district, and the platform validates geographic combinations without spending LLM tokens.
 
 ### 32–42 sec — Server Persistence
 - Click **Confirm & Submit Request**.
 - Show the persistent **Request UUID** confirmation banner.
 - Click **View planning signals** to return to `/dashboard`.
 
-### 42–55 sec — Dynamic Hotspot Recalculation & Plain-Language Metrics
+### 42–55 sec — Dynamic Hotspot Recalculation & All Requests Transparency
 - Point to the updated dashboard:
   - Total citizen demand incremented.
   - Ramanagara Roads requests increased.
@@ -79,7 +78,9 @@ sequenceDiagram
   - **Current Coverage**: existing planned scheme expenditure.
   - **Unaddressed Need (15%)**: residual deficit.
   - **Recommended Project**: *"Rural road rehabilitation"*.
-- **Say:** *“Gemini does not decide public budgets. AI structures the evidence; deterministic application logic calculates the planning signal.”*
+- Scroll down to **"All Citizen Requests"**:
+  - Show the complete log of all 52+ requests with pilot coverage status badges (*In Pilot Coverage* vs *Outside Pilot Coverage*).
+  - **Say:** *“AI does not decide public budgets. AI structures the evidence; deterministic application logic calculates the planning signal, while outside-pilot submissions are stored transparently without fake scores.”*
 
 ### 55–60 sec — Core Public-Sector Distinction
 - **Say:** *“This is not a grievance ticketing box. It is the intelligence layer that bridges citizen demand with official infrastructure benchmarks to guide capital allocation.”*

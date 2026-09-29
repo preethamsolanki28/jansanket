@@ -7,16 +7,33 @@
 import { InfrastructureCategory, Severity } from "./demo-data";
 export type { InfrastructureCategory, Severity };
 
-export const SUPPORTED_STATES_AND_DISTRICTS: Record<string, string[]> = {
-  Karnataka: ["Ramanagara", "Tumakuru"],
-  "Uttar Pradesh": ["Bahraich", "Varanasi"],
-  Rajasthan: ["Barmer", "Dausa"],
-  "Tamil Nadu": ["Dharmapuri", "Madurai"]
-};
+import {
+  PILOT_STATES_AND_DISTRICTS,
+  ALL_PILOT_DISTRICTS,
+  ALL_INDIAN_STATES,
+  INDIAN_DISTRICTS_BY_STATE,
+  LOCATION_ALIASES,
+  isPilotDistrict,
+  findCanonicalState,
+  resolveIndianLocation,
+  GeographicValidationResult,
+} from "./india-locations";
 
-export const ALL_SUPPORTED_DISTRICTS = Object.entries(SUPPORTED_STATES_AND_DISTRICTS).flatMap(
-  ([state, districts]) => districts.map((district) => ({ state, district }))
-);
+
+export {
+  PILOT_STATES_AND_DISTRICTS,
+  ALL_PILOT_DISTRICTS,
+  ALL_INDIAN_STATES,
+  INDIAN_DISTRICTS_BY_STATE,
+  isPilotDistrict,
+  findCanonicalState,
+  resolveIndianLocation,
+};
+export type { GeographicValidationResult };
+
+// Backward-compatible aliases for existing callers
+export const SUPPORTED_STATES_AND_DISTRICTS = PILOT_STATES_AND_DISTRICTS;
+export const ALL_SUPPORTED_DISTRICTS = ALL_PILOT_DISTRICTS;
 
 export const ALLOWED_CATEGORIES: InfrastructureCategory[] = [
   "roads",
@@ -49,81 +66,53 @@ export function isValidSource(source: unknown): source is RequestSource {
   return (ALLOWED_SOURCES as readonly string[]).includes(source.trim());
 }
 
-const DISTRICT_ALIASES: Record<string, { state: string; district: string }> = {
-  // Ramanagara
-  ramanagara: { state: "Karnataka", district: "Ramanagara" },
-  ramnagar: { state: "Karnataka", district: "Ramanagara" },
-  "ರಾಮನಗರ": { state: "Karnataka", district: "Ramanagara" },
-  "रामनगर": { state: "Karnataka", district: "Ramanagara" },
-
-  // Tumakuru
-  tumakuru: { state: "Karnataka", district: "Tumakuru" },
-  tumkur: { state: "Karnataka", district: "Tumakuru" },
-  "ತುಮಕೂರು": { state: "Karnataka", district: "Tumakuru" },
-  "तुमकुर": { state: "Karnataka", district: "Tumakuru" },
-
-  // Bahraich
-  bahraich: { state: "Uttar Pradesh", district: "Bahraich" },
-  "बहराइच": { state: "Uttar Pradesh", district: "Bahraich" },
-  "ಬಹ್ರೈಚ್": { state: "Uttar Pradesh", district: "Bahraich" },
-
-  // Varanasi
-  varanasi: { state: "Uttar Pradesh", district: "Varanasi" },
-  banaras: { state: "Uttar Pradesh", district: "Varanasi" },
-  kashi: { state: "Uttar Pradesh", district: "Varanasi" },
-  "वाराणसी": { state: "Uttar Pradesh", district: "Varanasi" },
-  "बनारस": { state: "Uttar Pradesh", district: "Varanasi" },
-  "ವಾರಣಾಸಿ": { state: "Uttar Pradesh", district: "Varanasi" },
-
-  // Barmer
-  barmer: { state: "Rajasthan", district: "Barmer" },
-  "बाड़मेर": { state: "Rajasthan", district: "Barmer" },
-  "ಬಾರ್ಮರ್": { state: "Rajasthan", district: "Barmer" },
-
-  // Dausa
-  dausa: { state: "Rajasthan", district: "Dausa" },
-  "दौसा": { state: "Rajasthan", district: "Dausa" },
-  "ದೌಸಾ": { state: "Rajasthan", district: "Dausa" },
-
-  // Dharmapuri
-  dharmapuri: { state: "Tamil Nadu", district: "Dharmapuri" },
-  "தருமபுரி": { state: "Tamil Nadu", district: "Dharmapuri" },
-  "धर्मपुरी": { state: "Tamil Nadu", district: "Dharmapuri" },
-  "ಧರ್ಮಪುರಿ": { state: "Tamil Nadu", district: "Dharmapuri" },
-
-  // Madurai
-  madurai: { state: "Tamil Nadu", district: "Madurai" },
-  "மதுரை": { state: "Tamil Nadu", district: "Madurai" },
-  "मदुरै": { state: "Tamil Nadu", district: "Madurai" },
-  "ಮಧುರೈ": { state: "Tamil Nadu", district: "Madurai" },
-};
-
 /**
- * Matches a district string against the canonical 8 pilot districts.
+ * Matches a district string against canonical references across India.
  * Returns state and canonical district name, or null if unrecognized.
  */
 export function findCanonicalDistrict(districtStr?: string | null): { state: string; district: string } | null {
   if (!districtStr || typeof districtStr !== "string") return null;
-  const clean = districtStr.trim().toLowerCase();
+  const clean = districtStr.trim();
+  if (!clean) return null;
 
-  for (const [alias, canonical] of Object.entries(DISTRICT_ALIASES)) {
-    if (clean === alias.toLowerCase() || clean.includes(alias.toLowerCase())) {
-      return canonical;
-    }
+  // 1. Direct resolution (exact match or alias match on the whole input)
+  const res = resolveIndianLocation(clean);
+  if (res.isValid && res.state && res.district) {
+    return { state: res.state, district: res.district };
   }
 
-  for (const [state, districts] of Object.entries(SUPPORTED_STATES_AND_DISTRICTS)) {
-    for (const d of districts) {
-      if (clean === d.toLowerCase() || clean.includes(d.toLowerCase()) || d.toLowerCase().includes(clean)) {
-        return { state, district: d };
+  // 2. Scan text for known city/district aliases (e.g. Bangalore, Banaras, Anjuna, etc.)
+  const lower = clean.toLowerCase();
+  for (const [alias, loc] of Object.entries(LOCATION_ALIASES)) {
+    if (alias.length >= 3) {
+      const escaped = alias.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const regex = new RegExp(`(^|\\b|\\s)${escaped}(\\b|\\s|$)`, "i");
+      if (regex.test(lower)) {
+        return { state: loc.state, district: loc.district };
       }
     }
   }
+
+  // 3. Scan text for official Indian district names (min 4 characters)
+  for (const [state, districts] of Object.entries(INDIAN_DISTRICTS_BY_STATE)) {
+    for (const d of districts) {
+      if (d.length >= 4) {
+        const escaped = d.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        const regex = new RegExp(`(^|\\b|\\s)${escaped}(\\b|\\s|$)`, "i");
+        if (regex.test(lower)) {
+          return { state, district: d };
+        }
+      }
+    }
+  }
+
   return null;
 }
 
+
 export interface DistrictCoverageResult {
-  isSupported: boolean;
+  isSupported: boolean; // In 8 pilot districts
+  isGeographicallyValid: boolean; // Valid Indian state + district combination
   canonical: { state: string; district: string } | null;
   rawDistrict?: string;
   rawState?: string;
@@ -131,59 +120,45 @@ export interface DistrictCoverageResult {
 }
 
 /**
- * Validates whether a specified district and state fall within the 8 pilot districts.
- * State and district are strictly validated as a matching pair.
- * Never silently defaults or replaces an unsupported district or mismatched state.
+ * Validates a district and state across India.
+ * Distinguishes geographic validity (any real Indian state+district)
+ * from pilot analytics coverage (the 8 demo context districts).
  */
 export function checkDistrictCoverage(districtStr?: string | null, stateStr?: string | null): DistrictCoverageResult {
   if (!districtStr || typeof districtStr !== "string" || !districtStr.trim()) {
     return {
       isSupported: false,
+      isGeographicallyValid: false,
       canonical: null,
-      message: "No district specified. Please select a supported district."
+      message: "No district specified. Please select or enter a district."
     };
   }
 
   const cleanDistrict = districtStr.trim();
   const cleanState = stateStr && typeof stateStr === "string" ? stateStr.trim() : undefined;
 
-  const canonical = findCanonicalDistrict(cleanDistrict);
+  const geo = resolveIndianLocation(cleanDistrict, cleanState);
 
-  if (!canonical) {
+  if (!geo.isValid || !geo.district || !geo.state) {
     return {
       isSupported: false,
+      isGeographicallyValid: false,
       canonical: null,
       rawDistrict: cleanDistrict,
       rawState: cleanState,
-      message: `District "${cleanDistrict}"${cleanState ? ` in ${cleanState}` : ""} is outside the current demo coverage (8 pilot districts). Please select a supported district.`
+      message: geo.message || `District "${cleanDistrict}" does not match state "${cleanState}".`
     };
   }
 
-  // If state is provided, strictly enforce matching state + district pair
-  if (cleanState) {
-    const normState = cleanState.toLowerCase();
-    const canonState = canonical.state.toLowerCase();
-
-    // Check direct equality or substring inclusion (e.g. "Karnataka" vs "karnataka")
-    const isStateMatch = normState === canonState || 
-      (normState.length >= 4 && canonState.includes(normState));
-
-    if (!isStateMatch) {
-      return {
-        isSupported: false,
-        canonical: null,
-        rawDistrict: cleanDistrict,
-        rawState: cleanState,
-        message: `State "${cleanState}" does not match district "${canonical.district}" (${canonical.district} is in ${canonical.state}).`
-      };
-    }
-  }
-
   return {
-    isSupported: true,
-    canonical,
+    isSupported: geo.isPilot,
+    isGeographicallyValid: true,
+    canonical: { state: geo.state, district: geo.district },
     rawDistrict: cleanDistrict,
-    rawState: canonical.state
+    rawState: geo.state,
+    message: geo.isPilot
+      ? undefined
+      : `District "${geo.district}" is outside current pilot analytics coverage.`
   };
 }
 
@@ -451,15 +426,15 @@ export function validateCitizenRequest(input: unknown): ValidationResult {
     errors.push("Need summary must not exceed 500 characters.");
   }
 
-  // 7. Known Pilot District & State (Strictly 8 Supported Districts and matching State-District pair)
+  // 7. Geographic Location (Valid State & District anywhere in India)
   const districtInput = typeof record.district === "string" ? record.district : "";
   const stateInput = typeof record.state === "string" ? record.state : "";
   const coverage = checkDistrictCoverage(districtInput, stateInput);
 
-  if (!coverage.isSupported || !coverage.canonical) {
+  if (!coverage.isGeographicallyValid || !coverage.canonical) {
     errors.push(
       coverage.message ||
-        `District "${districtInput}" is outside the current demo coverage. Must be one of: ${ALL_SUPPORTED_DISTRICTS.map((d) => d.district).join(", ")}.`
+        `District "${districtInput}" is not recognized or does not match state "${stateInput}".`
     );
   }
 

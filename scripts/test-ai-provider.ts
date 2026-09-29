@@ -170,18 +170,33 @@ async function runAiProviderTests() {
     `district: ${missingDistRes.district}`
   );
 
-  // 8. Unsupported district
-  console.log("\n--- 8. Unsupported District (Goa / Anjuna) ---");
-  const outsideCoverage = checkDistrictCoverage("Anjuna", "Goa");
+  // 8. India-wide Geographic Validation & Outside Pilot Coverage
+  console.log("\n--- 8. India-wide Geographic Validation & Outside Pilot Coverage ---");
+  // A. Karnataka + Ramanagara -> valid pilot district
+  const ramanagaraCoverage = checkDistrictCoverage("Ramanagara", "Karnataka");
   assert(
-    "Anjuna in Goa flagged as outside pilot coverage",
-    outsideCoverage.isSupported === false && outsideCoverage.canonical === null
+    "Karnataka + Ramanagara is geographically valid and in pilot coverage",
+    ramanagaraCoverage.isGeographicallyValid === true && ramanagaraCoverage.isSupported === true && ramanagaraCoverage.canonical?.district === "Ramanagara"
+  );
+
+  // B. Uttar Pradesh + Bahraich -> valid pilot district
+  const bahraichCoverage = checkDistrictCoverage("Bahraich", "Uttar Pradesh");
+  assert(
+    "Uttar Pradesh + Bahraich is geographically valid and in pilot coverage",
+    bahraichCoverage.isGeographicallyValid === true && bahraichCoverage.isSupported === true && bahraichCoverage.canonical?.district === "Bahraich"
+  );
+
+  // C. Goa + North Goa / Anjuna -> valid outside-pilot location accepted for storage
+  const anjunaCoverage = checkDistrictCoverage("Anjuna", "Goa");
+  assert(
+    "Anjuna in Goa resolves to North Goa (geographically valid, outside pilot coverage)",
+    anjunaCoverage.isGeographicallyValid === true && anjunaCoverage.isSupported === false && anjunaCoverage.canonical?.district === "North Goa"
   );
 
   const outsideValidation = validateCitizenRequest({
     raw_text: "Road in Anjuna village has potholes and streetlights are broken.",
     state: "Goa",
-    district: "Anjuna",
+    district: "North Goa",
     category: "roads",
     need_summary: "Road in Anjuna has potholes.",
     severity: "medium",
@@ -189,16 +204,23 @@ async function runAiProviderTests() {
     ai_confidence: 0.9
   });
   assert(
-    "Submission with unsupported district rejected by schema validation",
-    outsideValidation.isValid === false
+    "Valid outside-pilot district request is accepted by schema validation for storage",
+    outsideValidation.isValid === true
+  );
+
+  // D. Bangalore / Bengaluru Urban normalization
+  const bangaloreCoverage = checkDistrictCoverage("Bangalore", "Karnataka");
+  assert(
+    "Bangalore in Karnataka normalizes deterministically to Bengaluru Urban",
+    bangaloreCoverage.isGeographicallyValid === true && bangaloreCoverage.canonical?.district === "Bengaluru Urban"
   );
 
   // 9. State/District mismatch (Goa + Ramanagara)
   console.log("\n--- 9. State/District Mismatch (Goa + Ramanagara) ---");
   const mismatchCoverage = checkDistrictCoverage("Ramanagara", "Goa");
   assert(
-    "Mismatched pair (Goa + Ramanagara) rejected",
-    mismatchCoverage.isSupported === false && mismatchCoverage.canonical === null,
+    "Mismatched pair (Goa + Ramanagara) rejected deterministically",
+    mismatchCoverage.isGeographicallyValid === false && mismatchCoverage.isSupported === false && mismatchCoverage.canonical === null,
     `message: "${mismatchCoverage.message}"`
   );
 
@@ -213,9 +235,10 @@ async function runAiProviderTests() {
     ai_confidence: 0.95
   });
   assert(
-    "Submission with mismatched pair rejected by schema validation",
-    mismatchValidation.isValid === false
+    "Submission with mismatched pair (Goa + Ramanagara) rejected by schema validation",
+    mismatchValidation.isValid === false && mismatchValidation.errors.some((e) => e.includes("does not match") || e.includes("Karnataka"))
   );
+
 
   // 10. Malformed AI response handling
   console.log("\n--- 10. Malformed Response Recovery ---");

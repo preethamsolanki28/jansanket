@@ -16,17 +16,18 @@ flowchart TD
         SUBMIT -->|"View Planning Signal"| DASH
         
         subgraph Dashboard_Components [Dashboard Screen Components]
-            KPI["3 KPI Cards<br/>(Total Requests, Districts, Hotspots)"]
-            TABLE["Hotspot Table<br/>(Rank, District, Category, Gap, Score)"]
-            DETAIL["Selected Hotspot Detail<br/>(Demand, Gap, Impact, Unaddressed, Budget)"]
+            KPI["3 KPI Cards<br/>(Citizen Demand, Districts Monitored, High-Need Areas)"]
+            TABLE["High-Need Areas Table<br/>(Rank, District, Category, Gap, Score)"]
+            DETAIL["Selected Hotspot Detail<br/>(Demand, Need, People Affected, Current Coverage, Budget)"]
             FORMULA["Formula Breakdown Card<br/>(Transparent 40/30/15/15 weights)"]
+            ALL_REQS["All Citizen Requests Table<br/>(Complete 52+ request log with In/Outside Pilot badges)"]
         end
         
         subgraph Submit_Components [Intake Screen Components]
             PRESETS["1-Click Multilingual Presets<br/>(English, Hindi, Kannada, Tamil)"]
-            FORM["Textarea + Hints<br/>(Raw citizen language)"]
-            PREVIEW["AI Extraction Preview<br/>(Category, Need, Severity, Confidence)"]
-            REVIEW["Human-in-the-Loop Overrides<br/>(Editable fields before DB save)"]
+            FORM["Direct Citizen Intake Textarea<br/>(Clean civic flow, no AI explainer box)"]
+            GEO["India-Wide State & District Selectors<br/>(28 States + 8 UTs with static validation)"]
+            PREVIEW["Extraction Preview & Review<br/>(Category, Need, Severity, Location confirmation)"]
             CONFIRM["Confirm & Submit<br/>(Server persistence → UUID)"]
         end
         
@@ -117,15 +118,34 @@ flowchart TD
 **"How this signal is calculated" Explainer Card:**
 - Full transparent mathematical formula in plain language:
   $$\text{Priority Score} = 0.40 \times \text{Demand} + 0.30 \times \text{Need} + 0.15 \times \text{People Affected} + 0.15 \times \text{Unaddressed Need}$$
-- Explicit separation note explaining that Gemini extracts citizen facts, while deterministic TypeScript calculates policy priority.
+- Explicit separation note explaining that OpenRouter extracts citizen facts, while deterministic TypeScript calculates policy priority.
+
+**All Citizen Requests Section:**
+- **Title:** *"All Citizen Requests"*
+- **Subtitle:** *"Complete list of recorded citizen requests, including requests that are not currently part of the pilot hotspot ranking."*
+- **Scope:** Complete visibility over all recorded requests (~52+ seeded records + user submissions).
+- **Table Columns:**
+  1. `#`: Sequential index.
+  2. `State`: Indian State or Union Territory.
+  3. `District`: Validated District name.
+  4. `Category`: Infrastructure sector badge.
+  5. `Citizen Need / English Summary`: One-sentence English synthesis.
+  6. `Severity`: Controlled badge (`High`, `Medium`, `Low`).
+  7. `Language`: Input language code (`kn`, `hi`, `ta`, `en`).
+  8. `Source`: Citizen channel (`text`, `voice`, `manual_fallback`).
+  9. `Analytics Coverage`: Distinct status badge:
+     - **In Pilot Coverage** (`bg-emerald-50 text-emerald-800 border-emerald-200`): District has baseline context and contributes to hotspot scoring.
+     - **Outside Pilot Coverage** (`bg-amber-50 text-amber-800 border-amber-200`): Request is saved faithfully without a fabricated priority score.
+  10. `Created At`: Relative or formatted submission timestamp.
+- **Responsive Layout:** Contained inside an `overflow-x-auto` wrapper ensuring clean scrolling on mobile and tablet devices.
 
 ---
 
 ### 2. `/submit` — Citizen Request Intake
 
 **Header & Instructions:**
-- Clear civic prompt: *"Submit a local infrastructure or public service demand in your own language."*
-- Explanatory note: *"Gemini translates and structures citizen language for district planning."*
+- Focused civic intake: *"Submit a local infrastructure or public service demand in your own language."*
+- Technical AI pipeline explanations removed from citizen flow to keep the interface simple and focused.
 
 **Try an Example (Demo Content):**
 - Four distinct sample buttons clearly labelled as demo content to prevent accidental submission:
@@ -135,31 +155,35 @@ flowchart TD
   - `English (Sanitation - Varanasi)`: Overflowing village open drains.
 - When clicked, displays a visual demo badge and requires explicit click of *Analyze Request* before submission.
 
-**Input Controls:**
-- **Textarea:** Accessible input area with real-time character count and gibberish/meaningless text rejection.
-- **Location Hints:** Pilot State and District selectors (8 supported districts) with toggle to test outside-coverage districts (e.g. Goa / Anjuna).
-- **Analyze Action:** Primary button displaying `Analyzing with Gemini...` with an animated spinner.
+**Location Selection & Validation (India-Wide):**
+- **State Selection:** Dropdown supporting all 28 Indian States and 8 Union Territories.
+- **District Selection:** Dynamic dropdown populated based on selected State, with deterministic alias normalization (e.g., `Bangalore` $\rightarrow$ `Bengaluru Urban`).
+- **Extraction Behavior:**
+  - Auto-detected from complaint text if confidently identified.
+  - If district is missing, user is prompted to select/enter it.
+  - **Never defaults or forces to Ramanagara.**
+- **Geographic Validation:** Deterministically verified via `lib/india-locations.ts` without spending LLM tokens. State-district mismatches (e.g. `Goa + Ramanagara`) are rejected with a clear user message.
+- **Outside Pilot Notice:** When an outside-pilot district is selected, displays a clear informational note: *"This district is outside current pilot analytics coverage. Your request will be recorded and visible under All Citizen Requests, but will not receive a priority score."*
 
 **The 3 Distinct Intake States:**
 
 1. **VALID AI RESULT:**
-   - Source: `gemini`.
-   - Header: *AI Extraction Preview* with *Analyzed by Gemini 3.8 Flash* badge.
+   - Source: `text` (citizen channel), Provider: `openrouter` (`openai/gpt-4o-mini`).
+   - Header: *AI Extraction Preview* with *Analyzed by OpenRouter (GPT-4o-mini)* badge.
    - Genuine AI Confidence percentage badge (e.g., *AI Confidence: 94%*).
-   - Analytical Explainer Banner: *"Gemini converts the citizen's message into structured information so requests can be grouped and compared across districts."*
    - Shows original text in citizen's script and *What We Understood (English Summary)*.
-   - User verifies category, severity, and district before confirming.
+   - User verifies category, severity, state, and district before confirming.
 
 2. **VALID MANUAL FALLBACK:**
-   - Source: `manual_fallback` (triggered on HTTP 429 quota exhaustion or network timeout).
+   - Source: `manual_fallback` (triggered on HTTP 429 quota exhaustion or provider outage).
    - Header: *Manual Fallback Review* with *Manual Fallback Mode* badge.
    - AI Confidence badge: *AI Confidence: Not Available* (zero fake confidence).
    - Alert Banner: *"AI analysis is temporarily unavailable (API quota limit reached). You can continue using the manual fallback. Please review and confirm the category and district below."*
-   - District is never defaulted to Ramanagara; user must explicitly select a supported district.
+   - District is never defaulted to Ramanagara; user must explicitly select valid State and District.
    - Need summary displays an English synthesis (never raw Indic script).
 
 3. **INVALID REQUEST:**
-   - Triggered on gibberish, single-word junk, or non-civic input (e.g. `sdgsafdasafd`).
+   - Triggered on gibberish, single-word junk, casual chat, or non-civic input (e.g. `sdgsafdasafd`, `hello there`).
    - Red Alert Banner: *"Please describe a real infrastructure or public-service problem."*
    - Extraction preview is blocked; submission is prohibited.
 
@@ -173,25 +197,28 @@ flowchart TD
 
 - **Mobile Viewports (< 768px):**
   - KPI cards stack vertically into a 1-column layout.
-  - Hotspot table enables smooth horizontal scrolling with sticky rank column.
+  - Hotspot table and All Requests table enable smooth horizontal scrolling.
   - Selected Hotspot Detail panel flows directly beneath the table rather than side-by-side.
   - Submit form fields maintain full width with 48px touch-friendly hit targets.
 - **Desktop Viewports ($\ge 1024px$):**
   - 3-column KPI card grid.
-  - Split dashboard layout pairing the Hotspot Table with the Selected Hotspot Detail side-by-side for instantaneous comparison.
+  - Split dashboard layout pairing the Hotspot Table with the Selected Hotspot Detail side-by-side.
+  - Full-width All Citizen Requests log at the base of the dashboard.
 
 ## Error Handling & Defensive Fallbacks
 
 | Failure Scenario | User-Facing Feedback | Fallback Behavior |
 |---|---|---|
 | **Meaningless / Gibberish Input (`sdgsafdasafd`)** | Red Alert: *"Please describe a real infrastructure or public-service problem."* | Block analysis; zero AI confidence; zero district default; prevent DB save. |
-| **Outside-Coverage District (`Goa / Anjuna`)** | Warning Alert: *"This district is outside the current demo coverage. Please select a supported district."* | District left blank; user must choose one of 8 pilot districts; DB rejects unsupported locations with HTTP 422. |
-| **Gemini HTTP 429 Quota Exhaustion** | Amber Alert: *"AI analysis is temporarily unavailable (API quota limit reached). You can continue using the manual fallback."* | Switches to manual fallback; zero fake confidence; synthesizes English need summary; requires user confirmation. |
+| **State-District Mismatch (`Goa + Ramanagara`)** | Red Alert: *"District Ramanagara does not belong to Goa. Please select a valid district."* | Block submission with HTTP 422 until valid combination is selected. |
+| **Outside-Pilot District (`North Goa, Goa`)** | Info Note: *"Outside current pilot analytics coverage."* | Allowed for submission; stored faithfully; displayed in All Requests table; no fake priority score calculated. |
+| **AI Provider HTTP 429 Quota Exhaustion** | Amber Alert: *"AI analysis is temporarily unavailable (API quota limit reached). You can continue using the manual fallback."* | Switches to manual fallback; zero fake confidence; synthesizes English need summary; requires user confirmation. |
 | **Supabase / Network Disconnection** | Badge: *"Active Demo Store"* | Data is persisted in-memory (`localRequestStore`) so dashboard recalculation continues uninterrupted. |
 
 ## Seed Data & Demo Footprint
 
-- **Total Monitored States:** 4 (Karnataka, Uttar Pradesh, Rajasthan, Tamil Nadu)
+- **Intake Reach:** All 28 States and 8 Union Territories across India
+- **Monitored Pilot States:** 4 (Karnataka, Uttar Pradesh, Rajasthan, Tamil Nadu)
 - **Total Pilot Districts:** 8 (Ramanagara, Tumakuru, Bahraich, Varanasi, Barmer, Dausa, Dharmapuri, Madurai)
 - **District Context Benchmarks:** Exactly 48 rows ($8 \text{ districts} \times 6 \text{ categories}$)
 - **Pre-Seeded Citizen Requests:** 52 realistic natural-language submissions across English, Hindi, Kannada, and Tamil

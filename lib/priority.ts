@@ -132,13 +132,24 @@ export function computePlanningSignals(
 
   // 2. Count requests per (state, district, category)
   const countMap = new Map<string, number>();
-  const activeDistricts = new Set<string>();
+  const activePilotDistricts = new Set<string>();
+
+  // Monitored pilot districts keys
+  const pilotDistrictKeys = new Set<string>();
+  for (const ctx of contexts) {
+    pilotDistrictKeys.add(`${ctx.state}:${ctx.district}`.toLowerCase());
+  }
 
   for (const req of requests) {
     const key = `${req.state}:${req.district}:${req.category}`.toLowerCase();
     countMap.set(key, (countMap.get(key) || 0) + 1);
-    activeDistricts.add(`${req.state}:${req.district}`.toLowerCase());
+
+    const distKey = `${req.state}:${req.district}`.toLowerCase();
+    if (pilotDistrictKeys.has(distKey)) {
+      activePilotDistricts.add(distKey);
+    }
   }
+
 
   // 3. Compute priority scores for each context
   const hotspots: PlanningHotspot[] = [];
@@ -186,9 +197,10 @@ export function computePlanningSignals(
   return {
     summary: {
       total_requests: requests.length,
-      districts: activeDistricts.size,
+      districts: activePilotDistricts.size > 0 ? activePilotDistricts.size : pilotDistrictKeys.size,
       hotspots: hotspots.length
     },
+
     hotspots
   };
 }

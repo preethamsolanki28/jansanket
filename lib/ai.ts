@@ -42,8 +42,8 @@ const SYSTEM_INSTRUCTION = `You are an AI assistant for JanSanket, an Indian Dig
 Your task is to analyze unstructured citizen development requests and extract structured planning evidence.
 Rules:
 1. Assess Validity: Determine if the request describes a real infrastructure, public service, or community development problem. If the input is random characters, keyboard gibberish, test spam, greetings, casual chit-chat, personal remarks (e.g. "sdgsafdasafd", "hello there how are you", "this is a test", "I like apples"), or contains no civic issue, set is_valid_request to false, confidence to 0.0, and provide a clear rejection_reason ("Please describe a real infrastructure or public-service problem.").
-2. Extract rather than invent: Do NOT assign a default district if none was mentioned. If district or state is not mentioned, return null.
-3. Normalize Indian state and district names if mentioned (e.g. "रामनगर" or "Ramanagara" -> "Ramanagara", "தருமபுரி" or "Dharmapuri" -> "Dharmapuri", "बहराइच" -> "Bahraich"). If district or state is unmentioned or uncertain, return null.
+2. Extract rather than invent: Do NOT assign a default district if none was mentioned. If district or state is not mentioned, return null. NEVER default to Ramanagara.
+3. Normalize Indian state and district names if mentioned anywhere in India (e.g. "Bangalore" -> district: "Bengaluru Urban", state: "Karnataka"; "रामनगर" or "Ramanagara" -> district: "Ramanagara", state: "Karnataka"; "Varanasi" or "Banaras" -> district: "Varanasi", state: "Uttar Pradesh"; "Dharmapuri" -> "Dharmapuri"; "Bahraich" -> "Bahraich"; "Barmer" -> "Barmer"). If district or state is unmentioned or uncertain, return null.
 4. Categorize into exactly one of: "roads", "water", "sanitation", "healthcare", "education", "power", "transport", "other".
 5. Translate & Summarize in English: Produce a clear, concise one-sentence summary of the development need strictly in ENGLISH. If the input is in Kannada, Hindi, Tamil, or any regional language, translate the meaning into English. NEVER return the original non-English script in need_summary.
 6. Rate severity as "low", "medium", or "high".
@@ -302,9 +302,9 @@ export function getPreparedFallback(
   const coverage = candidateDistrict ? checkDistrictCoverage(candidateDistrict, candidateState) : null;
 
   const isSupportedDistrict = Boolean(coverage?.isSupported);
-  const canonicalDistrict = coverage?.isSupported ? coverage.canonical?.district || null : null;
-  const canonicalState = coverage?.isSupported ? coverage.canonical?.state || null : (candidateState || null);
-  const unsupportedDistrictName = candidateDistrict && !coverage?.isSupported ? candidateDistrict : null;
+  const canonicalDistrict = coverage?.isGeographicallyValid ? coverage.canonical?.district || null : null;
+  const canonicalState = coverage?.isGeographicallyValid ? coverage.canonical?.state || null : (candidateState || null);
+  const unsupportedDistrictName = candidateDistrict && !coverage?.isSupported ? (coverage?.canonical?.district || candidateDistrict) : null;
 
   return {
     isValidRequest: true,
@@ -494,15 +494,15 @@ export async function normalizeRequestWithOpenRouter(
     // 3. Validate severity
     const severity = isValidSeverity(parsed.severity) ? parsed.severity : "medium";
 
-    // 4. District validation & coverage check
+    // 4. District validation & coverage check across India
     const rawDistrict = parsed.district || districtHint || null;
     const rawState = parsed.state || stateHint || null;
     const coverage = checkDistrictCoverage(rawDistrict, rawState);
 
     const isSupportedDistrict = Boolean(coverage.isSupported);
-    const canonicalDistrict = coverage.isSupported ? coverage.canonical?.district || null : null;
-    const canonicalState = coverage.isSupported ? coverage.canonical?.state || null : rawState;
-    const unsupportedDistrictName = rawDistrict && !coverage.isSupported ? rawDistrict : null;
+    const canonicalDistrict = coverage.isGeographicallyValid ? coverage.canonical?.district || null : null;
+    const canonicalState = coverage.isGeographicallyValid ? coverage.canonical?.state || null : (rawState || null);
+    const unsupportedDistrictName = rawDistrict && !coverage.isSupported ? (coverage.canonical?.district || rawDistrict) : null;
 
     // 5. Validated need summary (strictly in English)
     let needSummary = typeof parsed.need_summary === "string" ? parsed.need_summary.trim() : "";

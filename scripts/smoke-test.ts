@@ -82,6 +82,7 @@ async function runProductionSmokeTest() {
     const res = await request(`${BASE_URL}/api/dashboard`);
     const summary = res.body?.summary;
     const hotspots = res.body?.hotspots;
+    const requestsList = res.body?.requests;
 
     if (
       res.status === 200 &&
@@ -90,19 +91,22 @@ async function runProductionSmokeTest() {
       summary.districts === 8 &&
       summary.hotspots >= 14 &&
       Array.isArray(hotspots) &&
-      hotspots.length >= 14
+      hotspots.length >= 14 &&
+      Array.isArray(requestsList) &&
+      requestsList.length >= 50
     ) {
       initialTotalRequests = summary.total_requests;
       const top = hotspots[0];
       initialRamanagaraCount = top.request_count;
       initialPriorityScore = top.priority_score;
 
-      console.log(`PASS (Total: ${summary.total_requests}, Districts: ${summary.districts}, Hotspots: ${summary.hotspots}, #1: ${top.district} ${top.category} [${top.priority_score}])`);
+      console.log(`PASS (Total: ${summary.total_requests}, Pilot: ${summary.pilot_requests ?? "all"}, Hotspots: ${summary.hotspots}, All Requests in Feed: ${requestsList.length}, #1: ${top.district} ${top.category} [${top.priority_score}])`);
       passed++;
     } else {
-      console.log("FAIL:", res.status, summary);
+      console.log("FAIL:", res.status, summary, { hasRequests: Array.isArray(requestsList) });
       failed++;
     }
+
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : "Error";
     console.log(`FAIL: ${msg}`);
@@ -285,9 +289,9 @@ async function runProductionSmokeTest() {
   }
 
   // -------------------------------------------------------------------------
-  // 7. Demo Scope Boundary Guard (Outside district Goa / Anjuna)
+  // 7. National Intake: Outside-Pilot District (Goa / North Goa) Accepted for Storage
   // -------------------------------------------------------------------------
-  process.stdout.write("7. Verifying outside-scope district (Goa / Anjuna) is never converted to Ramanagara... ");
+  process.stdout.write("7. Verifying outside-pilot district (Goa / North Goa) is accepted for storage and not forced to Ramanagara... ");
   try {
     const analyzeRes = await request(`${BASE_URL}/api/requests`, {
       method: "POST",
@@ -295,35 +299,45 @@ async function runProductionSmokeTest() {
         action: "analyze",
         rawText: "Road in Anjuna village has potholes and streetlights are broken.",
         stateHint: "Goa",
-        districtHint: "Anjuna"
+        districtHint: "North Goa"
       }
     });
 
     const ext = analyzeRes.body?.extraction;
     const notRamanagara = ext?.district !== "Ramanagara" && ext?.isSupportedDistrict === false;
 
+    // Submit outside-pilot request: Must succeed and be stored
     const submitRes = await request(`${BASE_URL}/api/requests`, {
       method: "POST",
       body: {
         action: "submit",
+        source: "text",
         requestData: {
           raw_text: "Road in Anjuna village has potholes and streetlights are broken.",
           category: "roads",
-          district: "Anjuna",
+          district: "North Goa",
           state: "Goa",
           severity: "medium",
-          need_summary: "Road in Anjuna village has potholes."
+          need_summary: "Road in Anjuna village has potholes and streetlights are broken.",
+          source: "text",
+          ai_confidence: 0.9
         }
       }
     });
 
-    const submitRejected = submitRes.status === 422;
+    const submitSucceeded = submitRes.status === 200 && submitRes.body?.success && submitRes.body?.request?.id;
 
-    if (notRamanagara && submitRejected) {
-      console.log("PASS (Not converted to Ramanagara, flagged as outside coverage, rejected on submit)");
+    // Verify it appears in dashboard under all requests and does NOT create a fabricated priority score
+    const dashRes = await request(`${BASE_URL}/api/dashboard`);
+    const allRequests = dashRes.body?.requests;
+    const foundInFeed = Array.isArray(allRequests) && allRequests.some((r: any) => r.state === "Goa" && r.district === "North Goa");
+    const noGoaHotspot = !dashRes.body?.hotspots?.some((h: any) => h.district === "North Goa" || h.state === "Goa");
+
+    if (notRamanagara && submitSucceeded && foundInFeed && noGoaHotspot) {
+      console.log("PASS (Accepted for storage, visible in All Requests feed, no fabricated hotspot score)");
       passed++;
     } else {
-      console.log("FAIL:", { notRamanagara, submitRejected, extDistrict: ext?.district });
+      console.log("FAIL:", { notRamanagara, submitSucceeded, foundInFeed, noGoaHotspot, extDistrict: ext?.district });
       failed++;
     }
   } catch (err: unknown) {
@@ -333,11 +347,11 @@ async function runProductionSmokeTest() {
   }
 
   // -------------------------------------------------------------------------
-  // 8. State-District Mismatch Guard (Goa + Ramanagara)
+  // 8. State-District Mismatch Guard (Goa + Ramanagara) vs Valid (UP + Bahraich)
   // -------------------------------------------------------------------------
-  process.stdout.write("8. Verifying state-district mismatch (Goa + Ramanagara) is rejected... ");
+  process.stdout.write("8. Verifying state-district mismatch (Goa + Ramanagara) is rejected and valid pair is accepted... ");
   try {
-    const submitRes = await request(`${BASE_URL}/api/requests`, {
+    const submitMismatchRes = await request(`${BASE_URL}/api/requests`, {
       method: "POST",
       body: {
         action: "submit",
@@ -347,23 +361,40 @@ async function runProductionSmokeTest() {
           district: "Ramanagara",
           state: "Goa", // Mismatched state
           severity: "high",
-          need_summary: "Road in Ramanagara has major potholes."
+          need_summary: "Road in Ramanagara has major potholes.",
+          ai_confidence: 0.95
         }
       }
     });
 
-    if (submitRes.status === 422 && Array.isArray(submitRes.body?.details)) {
-      const errorMsg = submitRes.body.details.join(" ");
-      const matchesMismatch = errorMsg.includes("does not match") || errorMsg.includes("Karnataka");
-      if (matchesMismatch) {
-        console.log("PASS (State 'Goa' rejected against district 'Ramanagara' with HTTP 422)");
-        passed++;
-      } else {
-        console.log("FAIL: Expected state mismatch message, got:", errorMsg);
-        failed++;
+    const mismatchRejected = submitMismatchRes.status === 422;
+
+    const submitValidRes = await request(`${BASE_URL}/api/requests`, {
+      method: "POST",
+      body: {
+        action: "submit",
+        source: "text",
+        requestData: {
+          raw_text: "Drinking water handpump broken in Bahraich village.",
+          category: "water",
+          district: "Bahraich",
+          state: "Uttar Pradesh",
+          severity: "high",
+          need_summary: "Drinking water handpump broken in Bahraich village.",
+          source: "text",
+          ai_confidence: 0.95
+        }
       }
+    });
+
+
+    const validAccepted = submitValidRes.status === 200 && submitValidRes.body?.success;
+
+    if (mismatchRejected && validAccepted) {
+      console.log("PASS (Goa + Ramanagara rejected with HTTP 422; UP + Bahraich successfully accepted)");
+      passed++;
     } else {
-      console.log("FAIL: Expected 422 for Goa + Ramanagara, got:", submitRes.status);
+      console.log("FAIL:", { mismatchRejected, validAccepted });
       failed++;
     }
   } catch (err: unknown) {
@@ -468,6 +499,39 @@ async function runProductionSmokeTest() {
     console.log(`FAIL: ${msg}`);
     failed++;
   }
+
+  // -------------------------------------------------------------------------
+  // 11. Location Normalization: Bangalore -> Bengaluru Urban
+  // -------------------------------------------------------------------------
+  process.stdout.write("11. Verifying Bangalore normalizes to Bengaluru Urban without forcing Ramanagara... ");
+  try {
+    const res = await request(`${BASE_URL}/api/requests`, {
+      method: "POST",
+      body: {
+        action: "analyze",
+        rawText: "Frequent electricity outage and transformer issues in Bangalore city wards.",
+        stateHint: "Karnataka",
+        districtHint: "Bangalore"
+      }
+    });
+
+    const ext = res.body?.extraction;
+    const isNormalized = ext?.district === "Bengaluru Urban" && ext?.state === "Karnataka";
+    const notForcedRamanagara = ext?.district !== "Ramanagara";
+
+    if (res.status === 200 && isNormalized && notForcedRamanagara) {
+      console.log(`PASS (Bangalore normalized to "${ext?.district}", State: "${ext?.state}", Ramanagara not forced)`);
+      passed++;
+    } else {
+      console.log("FAIL:", { status: res.status, district: ext?.district, state: ext?.state });
+      failed++;
+    }
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : "Error";
+    console.log(`FAIL: ${msg}`);
+    failed++;
+  }
+
 
   // -------------------------------------------------------------------------
   // Summary

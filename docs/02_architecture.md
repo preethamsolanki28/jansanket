@@ -23,62 +23,22 @@ The MVP uses the fixed stack without adding unnecessary external libraries. The 
 
 ```mermaid
 flowchart TD
-    subgraph Browser ["Client Browser (/submit & /dashboard)"]
-        CITIZEN[Citizen Intake UI<br/>/submit]
-        DASH[Planner Dashboard UI<br/>/dashboard]
-    end
-
-    subgraph ServerRoutes ["Next.js Server Runtime"]
-        API_REQ[POST /api/requests]
-        API_DASH[GET /api/dashboard]
-    end
-
-    subgraph InputScreening ["Defensive Input Screening"]
-        SCREEN{isMeaningfulRequest?<br/>lib/validation.ts}
-        REJECT[HTTP 400 Rejection<br/>'Please describe a real problem']
-    end
-
-    subgraph ProcessingCore ["Application Logic & AI Paths"]
-        AI_ENGINE[OpenRouter GPT-4o-mini<br/>lib/ai.ts]
-        FALLBACK[Manual Fallback Engine<br/>lib/ai.ts]
-        VAL[Strict Schema & Coverage Validation<br/>lib/validation.ts]
-        DB_LAYER[Persistence Layer<br/>lib/db.ts]
-        PRIORITY[Deterministic Priority Engine<br/>lib/priority.ts]
-    end
-
-    subgraph ThreeStates ["3 Distinct Intake States"]
-        S1["<b>1. VALID AI RESULT</b><br/>OpenRouter GPT-4o-mini extracted, AI confidence shown,<br/>English translation verified"]
-        S2["<b>2. VALID MANUAL FALLBACK</b><br/>HTTP 429 quota fallback, zero fake confidence,<br/>user explicitly confirms fields"]
-        S3["<b>3. INVALID REQUEST</b><br/>Gibberish rejected, zero confidence,<br/>no district assigned, no save allowed"]
-    end
-
-    subgraph DataStorage ["Data Storage & Fallback"]
-        SUPABASE[(Supabase Postgres<br/>citizen_requests & district_context)]
-        DEMO_STORE[(Active Demo Store<br/>lib/demo-data.ts)]
-    end
-
-    CITIZEN -->|1. Raw Text + Pilot Hints| API_REQ
-    API_REQ --> SCREEN
-    SCREEN -->|Meaningless / Gibberish| REJECT --> S3
-    SCREEN -->|Valid Citizen Problem| AI_ENGINE
-
-    AI_ENGINE -->|Success: Structured JSON| S1 --> VAL
-    AI_ENGINE -.->|Quota Exceeded / HTTP 429| FALLBACK --> S2 --> VAL
+    Citizen[Citizen Intake /submit] --> IntakeAI[OpenRouter GPT-4o-mini<br/>Language & Field Extraction]
+    IntakeAI --> Identification[State + District Identification<br/>Auto-detected or User Input]
+    Identification --> GeoVal[Deterministic Geographic Validation<br/>lib/india-locations.ts]
+    GeoVal -->|Valid State + District| Stored[Citizen Request Stored in Database<br/>lib/db.ts]
+    GeoVal -->|State/District Mismatch| Reject[HTTP 422 Rejection<br/>Clear Mismatch Message]
     
-    VAL -->|4. Validated Fields Preview| CITIZEN
-    CITIZEN -->|5. Confirm & Submit Request| API_REQ
-    API_REQ -->|6. Re-validate Server-Side| VAL
-    VAL -->|7. Validated Record| DB_LAYER
-    DB_LAYER -->|PostgREST Insert| SUPABASE
-    DB_LAYER -.->|DEMO_MODE / Offline| DEMO_STORE
-
-    DASH -->|Fetch Signals| API_DASH
-    API_DASH --> DB_LAYER
-    DB_LAYER -->|Read Requests & Context| SUPABASE
-    DB_LAYER -.->|DEMO_MODE / Offline| DEMO_STORE
-    DB_LAYER --> PRIORITY
-    PRIORITY -->|8. Ranked Hotspots + Plain-Language Breakdown| API_DASH
-    API_DASH -->|9. Render Live Dashboard| DASH
+    Stored --> IsPilot{"Is district in pilot set?<br/>(8 Pilot Districts)"}
+    IsPilot -- Yes --> Priority[Deterministic Priority Engine<br/>lib/priority.ts]
+    Priority --> Hotspot[High-Need Areas Hotspots Table<br/>lib/priority.ts]
+    
+    IsPilot -- No --> Outside[Stored as Outside Pilot Coverage<br/>No Fabricated Score]
+    
+    Hotspot --> DASH[/dashboard<br/>Planner Dashboard]
+    Outside --> DASH_ALL[All Citizen Requests Section<br/>Complete Request Visibility]
+    Stored --> DASH_ALL
+    DASH_ALL --> DASH
 ```
 
 ---
@@ -107,6 +67,7 @@ code-for-communities/
 │   └── ui/                          # shadcn primitives (button, card, table, etc.)
 ├── lib/
 │   ├── ai.ts                        # Provider-neutral AI client (OpenRouter GPT-4o-mini) + fallback
+│   ├── india-locations.ts           # 28 States, 8 UTs, static district validation & aliases
 │   ├── gemini.ts                    # Backward-compatibility alias re-exporting lib/ai.ts
 │   ├── validation.ts                # Strict schema & semantic validation rules
 │   ├── priority.ts                  # Deterministic priority formula & project mapping
@@ -114,8 +75,9 @@ code-for-communities/
 │   ├── demo-data.ts                 # 48 district context rows & 52 citizen requests
 │   └── utils.ts                     # Class name helper (cn)
 ├── scripts/
-│   ├── smoke-test.ts                # End-to-end production smoke test
-│   ├── test-ai-provider.ts          # Comprehensive AI provider test suite (11 categories)
+│   ├── smoke-test.ts                # End-to-end production smoke test (11/11 checks)
+│   ├── test-ai-provider.ts          # Comprehensive AI provider test suite
+│   ├── verify-ux-data-scope.ts      # UX + Data-scope verification script
 │   ├── test-m3-pipeline.ts          # M3 verification suite
 │   ├── test-m4-dashboard.ts         # M4 dashboard verification suite
 │   ├── test-m2-intake.mjs           # M2 intake test suite
@@ -139,7 +101,10 @@ code-for-communities/
 2. **AI interprets; deterministic code calculates:** The AI model must never decide the priority score, budget, or project approval.
 3. **No unnecessary PII:** Zero Aadhaar numbers, phone numbers, personal names, or exact home addresses are stored.
 4. **Server-side validation mandatory:** Client-side validation is for UX; `validateCitizenRequest()` enforces schema and semantic constraints on all incoming requests.
-5. **One canonical district reference:** Valid district/state combinations are constrained to the 8 pilot districts (`Ramanagara`, `Tumakuru`, `Bahraich`, `Varanasi`, `Barmer`, `Dausa`, `Dharmapuri`, `Madurai`).
+5. **Intake Scope vs. Analytics Scope:**
+   - **Citizen Intake:** India-wide (all 28 States and 8 Union Territories). State-district validation is strictly deterministic using static registry (`lib/india-locations.ts`). No LLM calls are spent on static geography.
+   - **Planning Analytics:** Scoped strictly to the 8 pilot districts (`Ramanagara`, `Tumakuru`, `Bahraich`, `Varanasi`, `Barmer`, `Dausa`, `Dharmapuri`, `Madurai`) where baseline infrastructure context rows exist (`demo_synthetic`).
+   - **Outside-pilot requests:** Stored faithfully as *"Outside Pilot Coverage"*; never assigned fake priority scores or fabricated metrics.
 6. **Explicit data labeling:** Baseline metrics are explicitly tagged `demo_synthetic`.
 7. **No live government API on critical path:** A public source failure cannot break the evaluation.
 8. **Browser does not write directly to Supabase:** Next.js server routes own database persistence.
@@ -331,7 +296,9 @@ other      -> Further planning review required
   "summary": {
     "total_requests": 52,
     "districts": 8,
-    "hotspots": 14
+    "hotspots": 14,
+    "pilot_requests": 52,
+    "outside_pilot_requests": 0
   },
   "hotspots": [
     {
@@ -347,6 +314,21 @@ other      -> Further planning review required
       "priority_score": 79.7,
       "recommended_project": "Rural road rehabilitation",
       "source_status": "demo_synthetic"
+    }
+  ],
+  "requests": [
+    {
+      "id": "a1b2c3d4-0001-4000-8000-000000000001",
+      "source": "text",
+      "raw_text": "Road to school completely washed out in rains",
+      "language_code": "en",
+      "state": "Karnataka",
+      "district": "Ramanagara",
+      "category": "roads",
+      "need_summary": "Rebuild school access road",
+      "severity": "high",
+      "ai_confidence": 0.95,
+      "created_at": "2026-09-29T00:00:00.000Z"
     }
   ],
   "meta": {

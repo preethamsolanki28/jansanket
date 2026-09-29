@@ -31,20 +31,26 @@ import {
   ArrowRight,
 } from "lucide-react";
 import { PlanningHotspot } from "@/lib/priority";
+import { CitizenRequest } from "@/lib/db";
+import { isPilotDistrict } from "@/lib/india-locations";
 
 interface DashboardData {
   summary: {
     total_requests: number;
+    pilot_requests?: number;
+    outside_pilot_requests?: number;
     districts: number;
     hotspots: number;
   };
   hotspots: PlanningHotspot[];
+  requests?: CitizenRequest[];
   meta: {
     provider: "supabase" | "demo_store";
     is_database_online: boolean;
     updated_at: string;
   };
 }
+
 
 export function DashboardView() {
   const [data, setData] = useState<DashboardData | null>(null);
@@ -155,6 +161,31 @@ export function DashboardView() {
     return "bg-slate-100 text-slate-700 border-slate-300 font-semibold";
   };
 
+  const getSeverityBadgeClass = (severity: string) => {
+    switch (severity?.toLowerCase()) {
+      case "high":
+        return "bg-rose-50 text-rose-700 border-rose-300";
+      case "medium":
+        return "bg-amber-50 text-amber-700 border-amber-300";
+      case "low":
+        return "bg-emerald-50 text-emerald-700 border-emerald-300";
+      default:
+        return "bg-slate-100 text-slate-700 border-slate-300";
+    }
+  };
+
+  const getSourceBadgeClass = (source: string) => {
+    switch (source) {
+      case "manual_fallback":
+        return "bg-amber-50 text-amber-800 border-amber-300";
+      case "voice":
+        return "bg-purple-50 text-purple-700 border-purple-300";
+      default:
+        return "bg-slate-50 text-slate-600 border-slate-200";
+    }
+  };
+
+
   return (
     <div className="space-y-8">
       {/* Header */}
@@ -247,7 +278,9 @@ export function DashboardView() {
           </CardHeader>
           <CardContent>
             <p className="text-xs text-muted-foreground">
-              Total citizen requests recorded across 4 supported languages
+              {data?.summary.pilot_requests !== undefined
+                ? `${data.summary.pilot_requests} in pilot • ${data.summary.outside_pilot_requests ?? 0} outside pilot`
+                : "Total citizen requests recorded across 4 supported languages"}
             </p>
           </CardContent>
         </Card>
@@ -574,6 +607,136 @@ export function DashboardView() {
           </p>
         </CardContent>
       </Card>
+
+      {/* All Citizen Requests Section */}
+      <Card className="bg-white border-border shadow-xs">
+        <CardHeader className="pb-3 border-b border-border">
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <div>
+              <CardTitle className="text-base font-bold text-foreground">
+                All Citizen Requests
+              </CardTitle>
+              <CardDescription className="text-xs text-muted-foreground mt-0.5">
+                Complete list of recorded citizen requests, including requests that are not currently part of the pilot hotspot ranking.
+              </CardDescription>
+            </div>
+            <div className="flex items-center gap-2">
+              <Badge variant="outline" className="text-xs bg-slate-50 border-slate-200">
+                {data?.requests?.length ?? 0} Recorded Requests
+              </Badge>
+            </div>
+          </div>
+        </CardHeader>
+
+        <CardContent className="p-0">
+          {loading ? (
+            <div className="p-12 text-center text-sm text-muted-foreground">
+              Loading citizen requests…
+            </div>
+          ) : !data?.requests || data.requests.length === 0 ? (
+            <div className="p-8 text-center bg-slate-50/50">
+              <p className="text-sm font-medium text-foreground">No citizen requests recorded yet.</p>
+              <p className="text-xs text-muted-foreground mt-1">
+                Citizen requests submitted from any Indian district will appear here.
+              </p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <Table className="min-w-[950px]">
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-12 text-center">#</TableHead>
+                    <TableHead>Location</TableHead>
+                    <TableHead>Category</TableHead>
+                    <TableHead>Citizen Need / English Summary</TableHead>
+                    <TableHead className="text-center">Severity</TableHead>
+                    <TableHead className="text-center">Language</TableHead>
+                    <TableHead className="text-center">Source</TableHead>
+                    <TableHead>Analytics Coverage</TableHead>
+                    <TableHead className="text-right">Created At</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {data.requests.map((r, index) => {
+                    const inPilot = isPilotDistrict(r.state, r.district);
+                    return (
+                      <TableRow key={r.id} className="hover:bg-slate-50/60 transition-colors">
+                        <TableCell className="text-center font-bold text-xs text-muted-foreground">
+                          #{index + 1}
+                        </TableCell>
+                        <TableCell>
+                          <div className="font-semibold text-foreground text-sm leading-tight">
+                            {r.district}
+                          </div>
+                          <div className="text-xs text-muted-foreground">{r.state}</div>
+                        </TableCell>
+                        <TableCell>
+                          <span
+                            className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium border capitalize ${getCategoryBadgeClass(
+                              r.category
+                            )}`}
+                          >
+                            {r.category}
+                          </span>
+                        </TableCell>
+                        <TableCell>
+                          <div className="max-w-xs sm:max-w-md text-xs text-foreground line-clamp-2" title={r.need_summary}>
+                            {r.need_summary}
+                          </div>
+                        </TableCell>
+                        <TableCell className="text-center">
+                          <span
+                            className={`inline-flex items-center px-2 py-0.5 rounded text-xs border capitalize font-medium ${getSeverityBadgeClass(
+                              r.severity
+                            )}`}
+                          >
+                            {r.severity}
+                          </span>
+                        </TableCell>
+                        <TableCell className="text-center">
+                          <span className="font-mono text-xs uppercase px-1.5 py-0.5 rounded bg-slate-100 text-slate-700 border border-slate-200">
+                            {r.language_code || "en"}
+                          </span>
+                        </TableCell>
+                        <TableCell className="text-center">
+                          <span
+                            className={`inline-flex items-center px-2 py-0.5 rounded text-xs border font-medium ${getSourceBadgeClass(
+                              r.source
+                            )}`}
+                          >
+                            {r.source}
+                          </span>
+                        </TableCell>
+                        <TableCell>
+                          {inPilot ? (
+                            <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-emerald-50 text-emerald-800 border border-emerald-300 whitespace-nowrap">
+                              In Pilot Coverage
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-slate-100 text-slate-700 border border-slate-300 whitespace-nowrap">
+                              Outside Pilot Coverage
+                            </span>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-right text-xs text-muted-foreground whitespace-nowrap">
+                          {r.created_at
+                            ? new Date(r.created_at).toLocaleDateString("en-IN", {
+                                month: "short",
+                                day: "numeric",
+                                year: "numeric",
+                              })
+                            : "—"}
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
     </div>
   );
 }

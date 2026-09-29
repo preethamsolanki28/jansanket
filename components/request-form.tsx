@@ -14,8 +14,6 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import {
-  ALL_SUPPORTED_DISTRICTS,
-  SUPPORTED_STATES_AND_DISTRICTS,
   ALLOWED_CATEGORIES,
   ALLOWED_SEVERITIES,
   InfrastructureCategory,
@@ -24,15 +22,22 @@ import {
   checkDistrictCoverage,
   isMeaningfulRequest,
 } from "@/lib/validation";
+import {
+  ALL_INDIAN_STATES,
+  INDIAN_DISTRICTS_BY_STATE,
+  isPilotDistrict,
+  isIndianState,
+} from "@/lib/india-locations";
+
 import { CitizenRequestExtractionResult } from "@/lib/ai";
 import {
-  Sparkles,
   AlertTriangle,
   CheckCircle2,
   ArrowRight,
-  ShieldAlert,
   Info,
 } from "lucide-react";
+
+
 
 const TRY_AN_EXAMPLE_SAMPLES = [
   {
@@ -88,8 +93,8 @@ export function RequestForm() {
   const [rawText, setRawText] = useState("");
   const [stateHint, setStateHint] = useState("");
   const [districtHint, setDistrictHint] = useState("");
-  const [customLocationMode, setCustomLocationMode] = useState(false);
   const [activeExampleLabel, setActiveExampleLabel] = useState<string | null>(null);
+
   const [isExampleLoaded, setIsExampleLoaded] = useState(false);
   const [demoAcknowledged, setDemoAcknowledged] = useState(false);
   const [manualReviewConfirmed, setManualReviewConfirmed] = useState(false);
@@ -116,8 +121,8 @@ export function RequestForm() {
     setRawText(sample.text);
     setStateHint(sample.state);
     setDistrictHint(sample.district);
-    setCustomLocationMode(false);
     setActiveExampleLabel(sample.label);
+
     setIsExampleLoaded(true);
     setDemoAcknowledged(false);
     setManualReviewConfirmed(false);
@@ -184,18 +189,32 @@ export function RequestForm() {
       setEditableSeverity(ext.severity || "medium");
       setManualReviewConfirmed(false);
 
-      // Strict district handling: Validate matching State + District pair
-      if (ext.isSupportedDistrict && ext.district && ext.state) {
+      // Geographic location handling: Validate State + District pair across India
+      if (ext.district && ext.state) {
         const pairCheck = checkDistrictCoverage(ext.district, ext.state);
-        if (pairCheck.isSupported && pairCheck.canonical) {
+        if (pairCheck.isGeographicallyValid && pairCheck.canonical) {
           setEditableDistrict(pairCheck.canonical.district);
           setEditableState(pairCheck.canonical.state);
         } else {
-          setEditableDistrict("");
+          // If mismatch or invalid, keep what was extracted so citizen can review/correct
+          setEditableDistrict(ext.district);
+          setEditableState(ext.state);
+        }
+      } else if (ext.district) {
+        const pairCheck = checkDistrictCoverage(ext.district);
+        if (pairCheck.isGeographicallyValid && pairCheck.canonical) {
+          setEditableDistrict(pairCheck.canonical.district);
+          setEditableState(pairCheck.canonical.state);
+        } else {
+          setEditableDistrict(ext.district);
           setEditableState("");
         }
+      } else if (ext.state && isIndianState(ext.state)) {
+        setEditableState(ext.state);
+        setEditableDistrict("");
       } else {
-        // District outside coverage or missing -> require explicit selection from supported pilot list
+
+        // District missing -> citizen must explicitly provide district. Never default to Ramanagara.
         setEditableDistrict("");
         setEditableState("");
       }
@@ -209,15 +228,15 @@ export function RequestForm() {
   };
 
   const handleConfirmSubmit = async () => {
-    if (!editableDistrict) {
-      setSubmissionError("This district is outside the current demo coverage. Please select a supported district.");
+    if (!editableDistrict || !editableState) {
+      setSubmissionError("Please select both State and District for this request.");
       return;
     }
 
-    // Strict state + district pair verification
+    // Strict state + district geographic pair verification across India
     const pairCheck = checkDistrictCoverage(editableDistrict, editableState);
-    if (!pairCheck.isSupported || !pairCheck.canonical) {
-      setSubmissionError(pairCheck.message || "State and district do not match. Please select a valid pilot district.");
+    if (!pairCheck.isGeographicallyValid || !pairCheck.canonical) {
+      setSubmissionError(pairCheck.message || "State and district do not match. Please verify your location.");
       return;
     }
 
@@ -296,11 +315,12 @@ export function RequestForm() {
     setSubmittedProvider(null);
     setAnalysisError(null);
     setSubmissionError(null);
-    setCustomLocationMode(false);
   };
+
 
   // State 3: Submitted Confirmation
   if (submittedResult) {
+    const isPilot = isPilotDistrict(submittedResult.state, submittedResult.district);
     return (
       <Card className="bg-white border-border shadow-xs">
         <CardHeader className="pb-3 border-b border-border bg-emerald-50/50">
@@ -310,6 +330,15 @@ export function RequestForm() {
               Request Recorded Successfully
             </span>
             <div className="flex items-center gap-2">
+              {isPilot ? (
+                <Badge variant="outline" className="bg-emerald-50 text-emerald-800 border-emerald-300 text-xs">
+                  In Pilot Coverage
+                </Badge>
+              ) : (
+                <Badge variant="outline" className="bg-slate-100 text-slate-800 border-slate-300 text-xs">
+                  Outside Pilot Coverage
+                </Badge>
+              )}
               <Badge variant="outline" className="bg-white text-xs border-emerald-300">
                 {submittedProvider === "supabase" ? "Persisted to Supabase Postgres" : "Saved in Active Demo Store"}
               </Badge>
@@ -322,7 +351,9 @@ export function RequestForm() {
             Citizen Demand Signal Queued
           </CardTitle>
           <CardDescription className="text-xs text-muted-foreground">
-            Request recorded into planning intelligence. District demand signals recalculate dynamically.
+            {isPilot
+              ? "Request recorded into planning intelligence. District demand signals recalculate dynamically."
+              : "Request recorded successfully. (Outside current 8-district pilot analytics coverage; stored for future planning)."}
           </CardDescription>
         </CardHeader>
         <CardContent className="pt-6 space-y-5">
@@ -376,13 +407,20 @@ export function RequestForm() {
   }
 
   // Pre-conditions for submitting review
+  const locationValidation =
+    editableDistrict && editableState
+      ? checkDistrictCoverage(editableDistrict, editableState)
+      : null;
+
   const canSubmit = Boolean(
     editableDistrict &&
     editableState &&
+    locationValidation?.isGeographicallyValid &&
     (!extraction?.isFallback || manualReviewConfirmed) &&
     (!isExampleLoaded || demoAcknowledged) &&
     !isSubmitting
   );
+
 
   return (
     <div className="space-y-6">
@@ -394,11 +432,11 @@ export function RequestForm() {
               Citizen Development Request
             </CardTitle>
             <Badge variant="outline" className="text-xs font-normal">
-              8 Pilot Districts Covered
+              National Intake • 8 Pilot Districts Scored
             </Badge>
           </div>
           <CardDescription className="text-xs text-muted-foreground">
-            Enter a local infrastructure need in English, Hindi, Kannada, or Tamil. Gemini translates and structures it for district planning.
+            Enter a local infrastructure need in English, Hindi, Kannada, or Tamil from any Indian state. AI translates and structures it for district planning.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-5">
@@ -476,108 +514,73 @@ export function RequestForm() {
               />
             </div>
 
-            {/* Location Selectors: Supported 8 districts vs Custom/Outside */}
+            {/* Location Selectors: India-wide State & District Hint */}
             <div className="space-y-2">
               <div className="flex items-center justify-between">
                 <span className="text-xs font-semibold text-muted-foreground">
                   Location (Optional Context Hint)
                 </span>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setCustomLocationMode(!customLocationMode);
-                    setStateHint("");
-                    setDistrictHint("");
-                  }}
-                  className="text-[11px] text-primary hover:underline cursor-pointer"
-                >
-                  {customLocationMode ? "← Select from 8 supported pilot districts" : "Test an outside / other district"}
-                </button>
+                <span className="text-[11px] text-muted-foreground">
+                  Can also auto-detect directly from your request text
+                </span>
               </div>
 
-              {!customLocationMode ? (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div className="space-y-1.5">
-                    <label htmlFor="stateHintSelect" className="text-xs font-medium text-muted-foreground block">
-                      Pilot State
-                    </label>
-                    <select
-                      id="stateHintSelect"
-                      value={stateHint}
-                      onChange={(e) => {
-                        setStateHint(e.target.value);
-                        setDistrictHint("");
-                      }}
-                      className="w-full rounded-md border border-input bg-white px-3 py-2 text-sm shadow-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                      disabled={isAnalyzing}
-                    >
-                      <option value="">Auto-detect from request text</option>
-                      {Object.keys(SUPPORTED_STATES_AND_DISTRICTS).map((s) => (
-                        <option key={s} value={s}>{s}</option>
-                      ))}
-                    </select>
-                  </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="space-y-1.5">
+                  <label htmlFor="stateHintSelect" className="text-xs font-medium text-muted-foreground block">
+                    State / Union Territory
+                  </label>
+                  <select
+                    id="stateHintSelect"
+                    value={stateHint}
+                    onChange={(e) => {
+                      setStateHint(e.target.value);
+                      setDistrictHint("");
+                    }}
+                    className="w-full rounded-md border border-input bg-white px-3 py-2 text-sm shadow-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                    disabled={isAnalyzing}
+                  >
+                    <option value="">Auto-detect from request text</option>
+                    {ALL_INDIAN_STATES.map((s) => (
+                      <option key={s} value={s}>
+                        {s}
+                      </option>
+                    ))}
+                  </select>
+                </div>
 
-                  <div className="space-y-1.5">
-                    <label htmlFor="districtHintSelect" className="text-xs font-medium text-muted-foreground block">
-                      Pilot District
-                    </label>
+                <div className="space-y-1.5">
+                  <label htmlFor="districtHintSelect" className="text-xs font-medium text-muted-foreground block">
+                    District
+                  </label>
+                  {stateHint ? (
                     <select
                       id="districtHintSelect"
                       value={districtHint}
-                      onChange={(e) => {
-                        const dist = e.target.value;
-                        setDistrictHint(dist);
-                        const match = ALL_SUPPORTED_DISTRICTS.find((d) => d.district === dist);
-                        if (match) setStateHint(match.state);
-                      }}
+                      onChange={(e) => setDistrictHint(e.target.value)}
                       className="w-full rounded-md border border-input bg-white px-3 py-2 text-sm shadow-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                       disabled={isAnalyzing}
                     >
                       <option value="">Auto-detect from request text</option>
-                      {(stateHint && SUPPORTED_STATES_AND_DISTRICTS[stateHint]
-                        ? SUPPORTED_STATES_AND_DISTRICTS[stateHint].map((d) => ({ state: stateHint, district: d }))
-                        : ALL_SUPPORTED_DISTRICTS
-                      ).map((item) => (
-                        <option key={item.district} value={item.district}>
-                          {item.district} ({item.state})
+                      {(INDIAN_DISTRICTS_BY_STATE[stateHint] || []).map((d) => (
+                        <option key={d} value={d}>
+                          {d} {isPilotDistrict(stateHint, d) ? "★ (Pilot)" : ""}
                         </option>
                       ))}
                     </select>
-                  </div>
-                </div>
-              ) : (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 p-3 bg-amber-50/50 border border-amber-200 rounded-md">
-                  <div className="space-y-1.5">
-                    <label htmlFor="customState" className="text-xs font-medium text-amber-900 block">
-                      Custom State (e.g. Goa)
-                    </label>
+                  ) : (
                     <input
-                      id="customState"
-                      type="text"
-                      value={stateHint}
-                      onChange={(e) => setStateHint(e.target.value)}
-                      placeholder="e.g. Goa"
-                      className="w-full rounded-md border border-input bg-white px-3 py-2 text-sm shadow-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                      disabled={isAnalyzing}
-                    />
-                  </div>
-                  <div className="space-y-1.5">
-                    <label htmlFor="customDistrict" className="text-xs font-medium text-amber-900 block">
-                      Custom District (e.g. Anjuna)
-                    </label>
-                    <input
-                      id="customDistrict"
+                      id="districtHintSelect"
                       type="text"
                       value={districtHint}
                       onChange={(e) => setDistrictHint(e.target.value)}
-                      placeholder="e.g. Anjuna"
+                      placeholder="Auto-detect (or enter district hint)"
                       className="w-full rounded-md border border-input bg-white px-3 py-2 text-sm shadow-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                       disabled={isAnalyzing}
                     />
-                  </div>
+                  )}
                 </div>
-              )}
+              </div>
             </div>
 
             {/* Error display for invalid/gibberish input */}
@@ -677,28 +680,6 @@ export function RequestForm() {
           </CardHeader>
 
           <CardContent className="pt-5 space-y-4">
-            {/* Explanatory line explaining the purpose of AI */}
-            <div className="p-3 bg-blue-50/70 border border-blue-200 rounded-md text-xs text-blue-900 flex items-start gap-2.5">
-              <Sparkles className="h-4 w-4 text-primary shrink-0 mt-0.5" />
-              <div className="space-y-1">
-                <p className="font-semibold text-blue-950">
-                  How JanSanket uses AI:
-                </p>
-                <p className="text-blue-800 leading-snug">
-                  AI converts the citizen&apos;s message into structured information (language, category, location, severity, and English need summary) so requests can be grouped and compared across districts. AI does NOT compute priority scores or allocate budgets—that is calculated deterministically by JanSanket&apos;s planning algorithm.
-                </p>
-                <div className="pt-0.5 flex items-center gap-1.5 text-[11px] text-blue-700 font-medium flex-wrap">
-                  <span>Citizen Language</span>
-                  <span>&rarr;</span>
-                  <span>AI structures evidence</span>
-                  <span>&rarr;</span>
-                  <span>Application aggregates requests</span>
-                  <span>&rarr;</span>
-                  <span>Deterministic planning score</span>
-                </div>
-              </div>
-            </div>
-
             {/* Fallback Banner if Gemini failed (e.g. 429 quota exhaustion) */}
             {extraction.isFallback && (
               <Alert className="bg-amber-50/90 border-amber-300 text-amber-900 py-2.5">
@@ -712,29 +693,48 @@ export function RequestForm() {
               </Alert>
             )}
 
-            {/* BUG 2: Unsupported District Alert (e.g. Goa / Anjuna) */}
-            {(!extraction.isSupportedDistrict || !editableDistrict) && (
-              <Alert className="bg-amber-50 border-amber-300 text-amber-900 py-2.5">
-                <ShieldAlert className="h-4 w-4 text-amber-700 shrink-0" />
+            {/* Location Validation Feedback: Mismatch / Outside Pilot / In Pilot / Missing */}
+            {locationValidation && !locationValidation.isGeographicallyValid ? (
+              <Alert variant="destructive" className="py-2.5">
+                <AlertTriangle className="h-4 w-4 shrink-0" />
                 <div>
-                  <AlertTitle className="text-xs font-semibold text-amber-950">
-                    District Outside Demo Coverage
-                  </AlertTitle>
-                  <AlertDescription className="text-xs leading-relaxed text-amber-900 mt-0.5">
-                    {extraction.unsupportedDistrictName ? (
-                      <>
-                        The location <strong>&quot;{extraction.unsupportedDistrictName}&quot;</strong> is outside the current demo coverage (8 pilot districts).
-                        Please select a supported district from the dropdown below to test planning signals.
-                      </>
-                    ) : (
-                      <>
-                        This district is outside the current demo coverage. Please select a supported district from the 8 pilot districts below.
-                      </>
-                    )}
+                  <AlertTitle className="text-xs font-semibold">Location Mismatch</AlertTitle>
+                  <AlertDescription className="text-xs">
+                    {locationValidation.message || `District "${editableDistrict}" does not belong to ${editableState}.`}
                   </AlertDescription>
                 </div>
               </Alert>
-            )}
+            ) : locationValidation && locationValidation.isGeographicallyValid && !locationValidation.isSupported ? (
+              <div className="p-3 rounded-md bg-slate-50 border border-slate-200 text-xs flex items-start gap-2.5">
+                <Info className="h-4 w-4 text-blue-600 shrink-0 mt-0.5" />
+                <div>
+                  <span className="font-semibold text-slate-800">Outside Current Pilot Analytics Coverage:</span>
+                  <p className="text-slate-600 mt-0.5">
+                    <strong>{locationValidation.canonical?.district || editableDistrict}, {locationValidation.canonical?.state || editableState}</strong> is outside the 8 pilot planning districts. Your request will be recorded and stored for future planning, but is not currently scored in the pilot hotspot ranking.
+                  </p>
+                </div>
+              </div>
+            ) : locationValidation && locationValidation.isSupported ? (
+              <div className="p-3 rounded-md bg-emerald-50/70 border border-emerald-200 text-xs flex items-start gap-2.5">
+                <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0 mt-0.5" />
+                <div>
+                  <span className="font-semibold text-emerald-800">In Pilot Analytics Coverage:</span>
+                  <p className="text-emerald-700 mt-0.5">
+                    This district is part of the 8 pilot planning districts. Demand signals and priority scores will recalculate upon submission.
+                  </p>
+                </div>
+              </div>
+            ) : !editableDistrict ? (
+              <div className="p-3 rounded-md bg-amber-50/80 border border-amber-200 text-xs flex items-start gap-2.5">
+                <Info className="h-4 w-4 text-amber-700 shrink-0 mt-0.5" />
+                <div>
+                  <span className="font-semibold text-amber-900">District Required:</span>
+                  <p className="text-amber-800 mt-0.5">
+                    Please select your district below before confirming submission.
+                  </p>
+                </div>
+              </div>
+            ) : null}
 
             {/* Multilingual Transformation Display (BUG 4) */}
             <div className="grid grid-cols-1 gap-3 p-3 rounded-lg bg-slate-50 border border-border text-xs">
@@ -801,55 +801,71 @@ export function RequestForm() {
                 </select>
               </div>
 
-              {/* Supported District Select (Strictly 8 Supported Districts) */}
+              {/* State Select */}
+              <div className="space-y-1.5">
+                <label htmlFor="targetStateSelect" className="text-xs font-semibold text-muted-foreground block">
+                  State / Union Territory <span className="text-destructive">*</span>
+                </label>
+                <select
+                  id="targetStateSelect"
+                  value={editableState}
+                  onChange={(e) => {
+                    const newState = e.target.value;
+                    setEditableState(newState);
+                    if (editableDistrict && newState) {
+                      const check = checkDistrictCoverage(editableDistrict, newState);
+                      if (!check.isGeographicallyValid) {
+                        setEditableDistrict("");
+                      }
+                    }
+                    setSubmissionError(null);
+                  }}
+                  className={`w-full rounded-md border px-3 py-2 text-sm shadow-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring ${
+                    !editableState ? "border-amber-400 bg-amber-50/30" : "border-input bg-white"
+                  }`}
+                >
+                  <option value="">-- Select State / UT --</option>
+                  {ALL_INDIAN_STATES.map((s) => (
+                    <option key={s} value={s}>
+                      {s}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* District Select */}
               <div className="space-y-1.5">
                 <label htmlFor="targetDistrictSelect" className="text-xs font-semibold text-muted-foreground block">
-                  Target District <span className="text-destructive">*</span>
+                  District <span className="text-destructive">*</span>
                   {!editableDistrict && (
-                    <span className="text-amber-700 font-normal ml-1">(Required: select a supported district)</span>
+                    <span className="text-amber-700 font-normal ml-1">(Required: select your district)</span>
                   )}
                 </label>
                 <select
                   id="targetDistrictSelect"
                   value={editableDistrict}
                   onChange={(e) => {
-                    const sel = ALL_SUPPORTED_DISTRICTS.find((d) => d.district === e.target.value);
-                    if (sel) {
-                      setEditableDistrict(sel.district);
-                      setEditableState(sel.state);
-                      setSubmissionError(null);
-                    } else {
-                      setEditableDistrict("");
-                      setEditableState("");
-                    }
+                    setEditableDistrict(e.target.value);
+                    setSubmissionError(null);
                   }}
+                  disabled={!editableState}
                   className={`w-full rounded-md border px-3 py-2 text-sm shadow-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring ${
                     !editableDistrict ? "border-amber-400 bg-amber-50/30" : "border-input bg-white"
                   }`}
                 >
-                  <option value="">-- Please select a supported district --</option>
-                  {ALL_SUPPORTED_DISTRICTS.map((item) => (
-                    <option key={item.district} value={item.district}>
-                      {item.district} ({item.state})
-                    </option>
-                  ))}
+                  <option value="">
+                    {editableState ? `-- Select District in ${editableState} --` : "-- Select a State first --"}
+                  </option>
+                  {editableState &&
+                    (INDIAN_DISTRICTS_BY_STATE[editableState] || []).map((dist) => (
+                      <option key={dist} value={dist}>
+                        {dist} {isPilotDistrict(editableState, dist) ? "★ (Pilot)" : ""}
+                      </option>
+                    ))}
                 </select>
               </div>
-
-              {/* State (Strictly derived from district) */}
-              <div className="space-y-1.5">
-                <label htmlFor="stateReadonly" className="text-xs font-semibold text-muted-foreground block">
-                  State / Territory
-                </label>
-                <input
-                  id="stateReadonly"
-                  type="text"
-                  value={editableState || "(Select a supported district)"}
-                  readOnly
-                  className="w-full rounded-md border border-input bg-slate-50 px-3 py-2 text-sm text-muted-foreground cursor-not-allowed"
-                />
-              </div>
             </div>
+
 
             {/* BUG 3: Explicit Manual Fallback Review Confirmation Checkbox */}
             {extraction.isFallback && (
